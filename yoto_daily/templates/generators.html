@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Generators · Yoto Daily{% endblock %}
+
+{% block content %}
+<section class="section section-lead">
+  <div class="lead">
+    <div class="lead-figure">
+      <div class="lead-object" style="--edge: var(--accent)">
+        <p class="lead-object-title">Generators</p>
+        <p class="lead-object-note">Configured in {{ config_file }}</p>
+      </div>
+    </div>
+    <div class="lead-aside">
+      <p class="aside-label">Choosing a generator</p>
+      <p class="aside-story">Add a request without a generator name and the default is used.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Music</h2>
+  <p class="section-note">A structured brief goes in; an audio file comes out.</p>
+
+  <ul class="generators">
+    {% for gen in music.generators %}
+      <li class="generator">
+        <span class="generator-state {% if gen.available %}generator-on{% else %}generator-off{% endif %}" aria-hidden="true"></span>
+        <span class="generator-main">
+          <span class="generator-name">
+            {{ gen.name }}
+            {% if gen.is_default %}<span class="generator-default">default</span>{% endif %}
+          </span>
+          <span class="generator-desc">{{ gen.description }}</span>
+          {% if gen.detail %}<span class="generator-detail">{{ gen.detail }}</span>{% endif %}
+        </span>
+        <span class="generator-side">
+          <span class="generator-type">{{ gen.type }}</span>
+          {% if gen.options %}
+            <span class="generator-options">
+              {% for key, value in gen.options.items() %}
+                <span class="option-pair"><span class="option-key">{{ key }}</span><span class="option-value">{{ value }}</span></span>
+              {% endfor %}
+            </span>
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Speech</h2>
+  <p class="section-note">A transcript goes in; a voice comes out.</p>
+
+  <ul class="generators">
+    {% for gen in speech.generators %}
+      <li class="generator">
+        <span class="generator-state {% if gen.available %}generator-on{% else %}generator-off{% endif %}" aria-hidden="true"></span>
+        <span class="generator-main">
+          <span class="generator-name">
+            {{ gen.name }}
+            {% if gen.is_default %}<span class="generator-default">default</span>{% endif %}
+          </span>
+          <span class="generator-desc">{{ gen.description }}</span>
+          {% if gen.detail %}<span class="generator-detail">{{ gen.detail }}</span>{% endif %}
+        </span>
+        <span class="generator-side">
+          <span class="generator-type">{{ gen.type }}</span>
+          {% if gen.options %}
+            <span class="generator-options">
+              {% for key, value in gen.options.items() %}
+                <span class="option-pair"><span class="option-key">{{ key }}</span><span class="option-value">{{ value }}</span></span>
+              {% endfor %}
+            </span>
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Books</h2>
+  <p class="section-note">What the read-book track can open in this installation.</p>
+
+  <ul class="formats">
+    {% for fmt in book_formats %}
+      <li class="format {% if not fmt.available %}format-off{% endif %}">
+        <span class="format-name">{{ fmt.format }}</span>
+        <span class="format-note">{{ fmt.note }}</span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

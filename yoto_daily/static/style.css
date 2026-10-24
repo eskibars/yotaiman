@@ -1,0 +1,646 @@
+/* Yoto Daily — "Ink & Signal"
+ *
+ * A working desk for publishing audio a child will hear. The ground is a
+ * pale field-guide grey-green rather than cream; the accent is a bottle
+ * green; the one memorable element is the duration spine, where each
+ * track's length is drawn as its share of the card's whole runtime.
+ */
+
+:root {
+  --paper: #eef0ea;
+  --surface: #ffffff;
+  --recessed: #e4e7de;
+  --ink: #181c1a;
+  --ink-soft: #59615c;
+  --ink-faint: #8d958f;
+  --accent: #0f5132;
+  --accent-tint: #dde8df;
+  --signal: #b33820;
+  --rule: #d2d7cc;
+
+  --font-display: "Fraunces", "Hoefler Text", Georgia, "Times New Roman", serif;
+  --font-ui: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  --measure: 68rem;
+  --gap: 1.5rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  line-height: 1.55;
+  font-feature-settings: "kern";
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--ink); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
+/* ------------------------------------------------------------------ */
+/* masthead                                                            */
+/* ------------------------------------------------------------------ */
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  flex-wrap: wrap;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); }
+
+/* A small coloured edge, like the face of a physical card. */
+.wordmark-mark {
+  width: 0.7rem;
+  height: 1.5rem;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.masthead-nav {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.92rem;
+}
+.masthead-nav a { color: var(--ink-soft); text-decoration: none; }
+.masthead-nav a:hover { color: var(--accent); }
+
+/* ------------------------------------------------------------------ */
+/* page                                                                */
+/* ------------------------------------------------------------------ */
+.page {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 1.5rem 4rem;
+}
+
+.section { padding: 2.5rem 0 0; }
+.section-quiet { padding-top: 3rem; }
+
+.section-title {
+  margin: 0 0 1.25rem;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.section-note {
+  margin: -0.85rem 0 1.5rem;
+  color: var(--ink-soft);
+  max-width: 46ch;
+}
+
+/* ------------------------------------------------------------------ */
+/* lead: the object and its context                                    */
+/* ------------------------------------------------------------------ */
+.lead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 2.5rem;
+  align-items: start;
+  padding: 2.5rem 0 0;
+}
+
+.lead-object {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 5px solid var(--edge, var(--accent));
+  border-radius: 2px;
+  padding: 1.75rem 1.75rem 1.5rem;
+}
+
+.lead-object-empty { background: transparent; border-style: dashed; border-left-style: solid; }
+
+.lead-object-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.lead-object-note {
+  margin: 0.6rem 0 0;
+  color: var(--ink-soft);
+  max-width: 40ch;
+}
+
+.lead-object-meta {
+  display: flex;
+  gap: 1.25rem;
+  margin: 1.25rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.aside-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.aside-story {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.aside-note { margin: 0.35rem 0 0; color: var(--ink-soft); font-size: 0.92rem; }
+
+.lead-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.9rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* the shelf: cards as objects                                         */
+/* ------------------------------------------------------------------ */
+.shelf {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.shelf-item { border-bottom: 1px solid var(--rule); }
+
+.shelf-link {
+  display: grid;
+  grid-template-columns: 5px minmax(0, 1fr) auto;
+  gap: 1.25rem;
+  align-items: center;
+  padding: 1.1rem 0.5rem 1.1rem 0;
+  text-decoration: none;
+  color: inherit;
+}
+.shelf-link:hover { background: var(--surface); }
+.shelf-link:hover .shelf-title { color: var(--accent); }
+
+.shelf-edge {
+  align-self: stretch;
+  min-height: 2.6rem;
+  border-radius: 2px;
+  background: var(--edge, var(--accent));
+}
+
+.shelf-main { display: block; min-width: 0; }
+
+.shelf-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.shelf-note {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  margin-top: 0.1rem;
+}
+
+.shelf-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+}
+
+.shelf-id {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.duration {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------------------ */
+/* the duration spine                                                  */
+/* ------------------------------------------------------------------ */
+.bar {
+  display: block;
+  height: 5px;
+  margin-top: 0.55rem;
+  background: var(--recessed);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+/* ------------------------------------------------------------------ */
+/* programme: chapters and tracks                                      */
+/* ------------------------------------------------------------------ */
+.chapter { margin-bottom: 2rem; }
+
+.chapter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.chapter-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tracks { list-style: none; margin: 0; padding: 0; }
+
+.track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--recessed);
+}
+.track:last-child { border-bottom: 0; }
+
+.track-main { min-width: 0; }
+
+.track-title {
+  display: block;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.track-side {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.track-kind {
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------ */
+/* forms                                                               */
+/* ------------------------------------------------------------------ */
+.options-grid,
+.chooser-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1.1rem;
+}
+
+.field { display: block; }
+.field-wide { grid-column: 1 / -1; }
+
+.field-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+.input::placeholder { color: var(--ink-faint); }
+.input:focus { border-color: var(--accent); }
+textarea.input { resize: vertical; min-height: 8rem; line-height: 1.5; }
+
+.input-small { width: 12rem; }
+
+.field-inline { display: flex; align-items: center; gap: 0.6rem; }
+.field-inline .field-label { margin: 0; }
+
+.switches {
+  margin: 1.5rem 0 0;
+  padding: 0.25rem 1.25rem 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface);
+}
+/* The legend sits in the fieldset's border gap; give it the fieldset's own
+   background so the rule does not run through the text. */
+.switches legend {
+  padding: 0 0.5rem;
+  background: var(--surface);
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  cursor: pointer;
+}
+.switch input { accent-color: var(--accent); width: 1rem; height: 1rem; }
+.switch-text { font-size: 0.98rem; }
+
+.options-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* buttons                                                             */
+/* ------------------------------------------------------------------ */
+.button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.button:hover { border-color: var(--ink-soft); color: var(--ink); }
+
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.button-primary:hover { background: #0b4227; border-color: #0b4227; color: #fff; }
+
+.button-danger { color: var(--signal); border-color: #e0c4bd; background: transparent; }
+.button-danger:hover { border-color: var(--signal); color: var(--signal); }
+
+.button-quiet {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+  background: transparent;
+  border-color: transparent;
+}
+.button-quiet:hover { color: var(--signal); border-color: #e0c4bd; }
+
+/* ------------------------------------------------------------------ */
+/* the composer: choosing what a track is                              */
+/* ------------------------------------------------------------------ */
+.composer > fieldset,
+.composer > .panel { margin: 0 0 1.5rem; }
+
+.chooser {
+  padding: 0.25rem 1.25rem 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface);
+}
+.chooser legend {
+  padding: 0 0.5rem;
+  background: var(--surface);
+}
+
+.choice {
+  display: block;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--paper);
+}
+.choice:hover { border-color: var(--ink-faint); }
+.choice input { accent-color: var(--accent); margin: 0 0.5rem 0 0; vertical-align: top; }
+
+.choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.choice-body { display: inline-block; vertical-align: top; }
+.choice-title { display: block; font-weight: 600; }
+.choice-note { display: block; font-size: 0.88rem; color: var(--ink-soft); }
+
+.panel {
+  padding: 1.25rem 1.25rem 1.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.panel-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.panel-note {
+  margin: 0.25rem 0 1.25rem;
+  color: var(--ink-soft);
+  max-width: 52ch;
+}
+
+/* The composer hides every panel and lets the script reveal the one that
+ * matches the chosen kind. Without the script, all panels show. */
+.panel { display: none; }
+
+/* ------------------------------------------------------------------ */
+/* generators                                                          */
+/* ------------------------------------------------------------------ */
+.generators {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.generator {
+  display: grid;
+  grid-template-columns: 0.55rem minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 1.1rem;
+  align-items: start;
+  padding: 1.1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.generator-state {
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-top: 0.45rem;
+  border-radius: 50%;
+}
+.generator-on { background: var(--accent); }
+.generator-off { background: var(--rule); }
+
+.generator-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.generator-default {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 2px;
+  vertical-align: 0.1rem;
+}
+
+.generator-desc { display: block; color: var(--ink-soft); font-size: 0.93rem; }
+.generator-detail { display: block; font-size: 0.85rem; color: var(--ink-faint); margin-top: 0.15rem; }
+
+.generator-side { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+.generator-type { font-size: 0.82rem; color: var(--ink-faint); }
+
+.generator-options { display: flex; flex-direction: column; gap: 0.1rem; }
+.option-pair { display: flex; gap: 0.5rem; font-size: 0.8rem; }
+.option-key { color: var(--ink-faint); min-width: 8.5rem; }
+.option-value { color: var(--ink-soft); overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ */
+/* formats                                                             */
+/* ------------------------------------------------------------------ */
+.formats {
+  list-style: none;
+  margin: 1.25rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.format {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  background: var(--surface);
+}
+.format-off { background: transparent; border-style: dashed; }
+.format-name { display: block; font-weight: 600; font-size: 0.95rem; }
+.format-note { display: block; font-size: 0.85rem; color: var(--ink-soft); }
+
+/* ------------------------------------------------------------------ */
+/* flash and empty states                                              */
+/* ------------------------------------------------------------------ */
+.flash-stack { padding-top: 1.5rem; display: grid; gap: 0.5rem; }
+
+.flash {
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border-radius: 2px;
+  border-left: 4px solid var(--ink-faint);
+  background: var(--surface);
+}
+.flash-success { border-left-color: var(--accent); }
+.flash-error { border-left-color: var(--signal); }
+
+.empty {
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px dashed var(--rule);
+  border-radius: 2px;
+  color: var(--ink-soft);
+  max-width: 46ch;
+}
+
+/* ------------------------------------------------------------------ */
+/* colophon                                                            */
+/* ------------------------------------------------------------------ */
+.colophon {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-faint);
+  font-size: 0.88rem;
+}
+.colophon p { margin: 0; }
+
+/* ------------------------------------------------------------------ */
+/* narrow screens                                                      */
+/* ------------------------------------------------------------------ */
+@media (max-width: 46rem) {
+  .lead { grid-template-columns: 1fr; gap: 1.5rem; }
+  .shelf-link { grid-template-columns: 5px minmax(0, 1fr); }
+  .shelf-side { grid-column: 2; flex-direction: row; gap: 0.75rem; align-items: baseline; }
+  .track { grid-template-columns: 1fr; gap: 0.5rem; }
+  .track-side { justify-content: flex-start; }
+  .generator { grid-template-columns: 0.55rem 1fr; }
+  .generator-side { grid-column: 2; }
+  .lead-object-title { font-size: 1.6rem; }
+}
+
+/* ------------------------------------------------------------------ */
+/* one quiet reveal on load                                            */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  .shelf-item, .chapter {
+    animation: settle 420ms ease-out both;
+  }
+  .shelf-item:nth-child(2) { animation-delay: 40ms; }
+  .shelf-item:nth-child(3) { animation-delay: 80ms; }
+  .shelf-item:nth-child(4) { animation-delay: 120ms; }
+  .shelf-item:nth-child(n+5) { animation-delay: 160ms; }
+}
+
+@keyframes settle {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}

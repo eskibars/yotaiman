@@ -1,0 +1,63 @@
+# Local service state: auth cookies, cached tokens, generated audio.
+.yoto/
+.yoto-daily/
+
+# Credentials and local configuration.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Editors and OS cruft
+.DS_Store
+.AppleDouble
+._*
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Runtime logs
+*.log
+
+# Reconnaissance artefacts: raw API dumps, captured traffic and the
+# minified Yoto bundles they were extracted from. The bundles are
+# Yoto's code and are not redistributed here.
+recon/assets/
+recon/traffic.json
+recon/content-*.json
+recon/.token*
+recon/.auth0cookie*
+recon/.cookies.json
+recon/.media_id
+
+# Generated media. The test fixture under recon/media is kept.
+*.mp3
+*.wav
+*.ogg
+*.opus
+*.aac
+*.m4a
+*.flac
+*.aiff
+*.pcm
+!recon/media/*.mp3

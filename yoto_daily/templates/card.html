@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}{{ card.title or 'Card' }} · Yoto Daily{% endblock %}
+
+{% block content %}
+<section class="section section-lead">
+  <div class="lead">
+    <div class="lead-figure">
+      <div class="lead-object" style="--edge: {{ edge(card.card_id) }}">
+        <p class="lead-object-title">{{ card.title or 'Untitled card' }}</p>
+        {% if card.description %}
+          <p class="lead-object-note">{{ card.description }}</p>
+        {% endif %}
+        <p class="lead-object-meta">
+          <span>{{ plural(card.content.chapters|length, 'chapter') }}</span>
+          <span>{{ duration(card.duration) }}</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="lead-aside">
+      <p class="aside-label">Card</p>
+      <p class="aside-story">{{ card.card_id }}</p>
+      {% if card.updated_at %}
+        <p class="aside-note">Updated {{ card.updated_at[:10] }}</p>
+      {% endif %}
+
+      <div class="lead-actions">
+        <a class="button button-primary" href="{{ url_for('web.add_track', card_id=card.card_id) }}">Add a track</a>
+        <a class="button" href="{{ url_for('api.get_card', card_id=card.card_id) }}">Card JSON</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Programme</h2>
+
+  {% if card.content.chapters %}
+    {% for chapter in card.content.chapters %}
+      <article class="chapter">
+        <header class="chapter-head">
+          <h3 class="chapter-title">{{ chapter.title or 'Chapter' }}</h3>
+          <span class="duration">{{ duration(chapter.duration) }}</span>
+        </header>
+
+        <ul class="tracks">
+          {% for track in chapter.tracks %}
+            <li class="track">
+              <span class="track-main">
+                <span class="track-title">{{ track.title or track.track_url }}</span>
+                <span class="bar" aria-hidden="true">
+                  <span class="bar-fill" style="width: {{ ((track.duration / total) * 100)|round|int }}%"></span>
+                </span>
+              </span>
+              <span class="track-side">
+                <span class="duration">{{ duration(track.duration) }}</span>
+                <span class="track-kind">{{ track.format or track.type }}</span>
+                <form method="post" action="{{ url_for('web.delete_track', card_id=card.card_id, key=track.key) }}">
+                  <button class="button button-quiet" type="submit">Delete</button>
+                </form>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </article>
+    {% endfor %}
+  {% else %}
+    <p class="empty">This card has no tracks. Add one, or publish a story onto it.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2 class="section-title">Options</h2>
+
+  <form method="post" action="{{ url_for('web.save_options', card_id=card.card_id) }}" class="options">
+    <div class="options-grid">
+      <label class="field">
+        <span class="field-label">Name</span>
+        <input class="input" type="text" name="title" value="{{ card.title or '' }}">
+      </label>
+
+      <label class="field">
+        <span class="field-label">Description</span>
+        <input class="input" type="text" name="description" value="{{ card.description or '' }}">
+      </label>
+    </div>
+
+    <fieldset class="switches">
+      <legend class="field-label">Playback</legend>
+
+      <label class="switch">
+        <input type="checkbox" name="always_play_from_start" {% if card.content.config.get('resumeTimeout') == 0 %}checked{% endif %}>
+        <span class="switch-text">Always play from start</span>
+      </label>
+
+      <label class="switch">
+        <input type="checkbox" name="shuffle" {% if card.content.config.get('shuffle') %}checked{% endif %}>
+        <span class="switch-text">Shuffle tracks each time</span>
+      </label>
+
+      <label class="switch">
+        <input type="checkbox" name="hide_track_numbers" {% if (card.content.edit_settings or {}).get('autoOverlayLabels') == 'disabled' %}checked{% endif %}>
+        <span class="switch-text">Hide track numbers</span>
+      </label>
+    </fieldset>
+
+    <div class="options-actions">
+      <button class="button button-primary" type="submit">Save options</button>
+      <button class="button button-danger" type="submit" name="clear_tracks" value="on">Remove every track</button>
+    </div>
+  </form>
+</section>
+
+<section class="section section-quiet">
+  <form method="post" action="{{ url_for('web.delete_card', card_id=card.card_id) }}">
+    <button class="button button-danger" type="submit">Delete this card</button>
+  </form>
+</section>
+{% endblock %}

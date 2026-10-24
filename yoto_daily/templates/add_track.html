@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Add a track · Yoto Daily{% endblock %}
+
+{% block head_extra %}
+  <script src="{{ url_for('static', filename='composer.js') }}" defer></script>
+  <noscript><style>.panel { display: block !important; }</style></noscript>
+{% endblock %}
+
+{% block content %}
+<section class="section section-lead">
+  <div class="lead">
+    <div class="lead-figure">
+      <div class="lead-object" style="--edge: var(--accent)">
+        <p class="lead-object-title">Add a track</p>
+        <p class="lead-object-note">To card {{ card_id }}</p>
+      </div>
+    </div>
+    <div class="lead-aside">
+      <p class="aside-label">Back</p>
+      <p class="aside-story"><a href="{{ url_for('web.card', card_id=card_id) }}">Return to the card</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <form method="post" action="{{ url_for('web.add_track_submit', card_id=card_id) }}" class="composer">
+
+    <fieldset class="chooser">
+      <legend class="field-label">What kind of track</legend>
+
+      <div class="chooser-grid">
+        <label class="choice">
+          <input type="radio" name="type" value="generate" checked>
+          <span class="choice-body">
+            <span class="choice-title">Generate</span>
+            <span class="choice-note">Make the audio here, then upload it.</span>
+          </span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="type" value="file">
+          <span class="choice-body">
+            <span class="choice-title">File</span>
+            <span class="choice-note">Upload an audio file you already have.</span>
+          </span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="type" value="stream">
+          <span class="choice-body">
+            <span class="choice-title">Stream</span>
+            <span class="choice-note">Play from a URL. Nothing is uploaded.</span>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset class="chooser chooser-nested">
+      <legend class="field-label">What makes it</legend>
+
+      <div class="chooser-grid">
+        <label class="choice">
+          <input type="radio" name="kind" value="music" checked>
+          <span class="choice-body">
+            <span class="choice-title">Music</span>
+            <span class="choice-note">A structured brief for a music generator.</span>
+          </span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="kind" value="text-to-speech">
+          <span class="choice-body">
+            <span class="choice-title">Text to speech</span>
+            <span class="choice-note">Read a transcript aloud.</span>
+          </span>
+        </label>
+
+        <label class="choice">
+          <input type="radio" name="kind" value="read-book">
+          <span class="choice-body">
+            <span class="choice-title">Read a book</span>
+            <span class="choice-note">Convert a book to text, then read it.</span>
+          </span>
+        </label>
+      </div>
+    </fieldset>
+
+    <div class="panel" data-panel="music">
+      <h3 class="panel-title">Music</h3>
+      <p class="panel-note">The brief is structured, not just a prompt. Each generator decides how to render it.</p>
+
+      <div class="options-grid">
+        <label class="field field-wide">
+          <span class="field-label">Prompt</span>
+          <input class="input" type="text" name="prompt" placeholder="gentle solo piano, calm bedtime music">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Tags</span>
+          <input class="input" type="text" name="tags" placeholder="calm, instrumental">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Tempo</span>
+          <input class="input" type="number" name="bpm" min="30" max="300" placeholder="80">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Key</span>
+          <input class="input" type="text" name="key_scale" placeholder="C Major">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Time signature</span>
+          <input class="input" type="text" name="time_signature" placeholder="4">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Seconds</span>
+          <input class="input" type="number" name="duration" min="10" max="600" placeholder="60">
+        </label>
+
+        {% if music %}
+          <label class="field">
+            <span class="field-label">Generator</span>
+            <select class="input" name="generator">
+              {% for gen in music %}
+                <option value="{{ gen.name }}" {% if gen.name == music_default %}selected{% endif %}>
+                  {{ gen.name }}{% if not gen.available %} (not reachable){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="panel" data-panel="text-to-speech">
+      <h3 class="panel-title">Text to speech</h3>
+      <p class="panel-note">A transcript. The generator reads it in the voice you choose.</p>
+
+      <div class="options-grid">
+        <label class="field field-wide">
+          <span class="field-label">Transcript</span>
+          <textarea class="input" name="text" rows="8" placeholder="Once upon a time..."></textarea>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Voice</span>
+          <input class="input" type="text" name="voice" placeholder="Karen">
+        </label>
+
+        {% if speech %}
+          <label class="field">
+            <span class="field-label">Generator</span>
+            <select class="input" name="generator">
+              {% for gen in speech %}
+                <option value="{{ gen.name }}" {% if gen.name == speech_default %}selected{% endif %}>
+                  {{ gen.name }}{% if not gen.available %} (not reachable){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="panel" data-panel="read-book">
+      <h3 class="panel-title">Read a book</h3>
+      <p class="panel-note">Each chapter of the book becomes its own track.</p>
+
+      <div class="options-grid">
+        <label class="field field-wide">
+          <span class="field-label">Book</span>
+          <input class="input" type="text" name="source" placeholder="/path/to/whale.epub or https://example.com/book">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Chapters to read</span>
+          <input class="input" type="number" name="chapters" min="1" placeholder="all of them">
+        </label>
+
+        {% if speech %}
+          <label class="field">
+            <span class="field-label">Generator</span>
+            <select class="input" name="generator">
+              {% for gen in speech %}
+                <option value="{{ gen.name }}" {% if gen.name == speech_default %}selected{% endif %}>
+                  {{ gen.name }}{% if not gen.available %} (not reachable){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+      </div>
+
+      <ul class="formats">
+        {% for fmt in book_formats %}
+          <li class="format {% if not fmt.available %}format-off{% endif %}">
+            <span class="format-name">{{ fmt.format }}</span>
+            <span class="format-note">{{ fmt.note }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="panel" data-panel="file">
+      <h3 class="panel-title">File</h3>
+      <p class="panel-note">An audio file on this machine, or one to fetch from a URL.</p>
+
+      <div class="options-grid">
+        <label class="field field-wide">
+          <span class="field-label">Path on this machine</span>
+          <input class="input" type="text" name="path" placeholder="/path/to/lullaby.mp3">
+        </label>
+
+        <label class="field field-wide">
+          <span class="field-label">Or a URL</span>
+          <input class="input" type="text" name="url" placeholder="https://example.com/lullaby.mp3">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel" data-panel="stream">
+      <h3 class="panel-title">Stream</h3>
+      <p class="panel-note">The player fetches this itself. Nothing is uploaded to Yoto.</p>
+
+      <div class="options-grid">
+        <label class="field field-wide">
+          <span class="field-label">URL</span>
+          <input class="input" type="text" name="url" placeholder="https://example.com/episode.mp3">
+        </label>
+
+        <label class="field">
+          <span class="field-label">Format</span>
+          <input class="input" type="text" name="format" value="mp3">
+        </label>
+      </div>
+    </div>
+
+    <div class="options-grid">
+      <label class="field">
+        <span class="field-label">Track title</span>
+        <input class="input" type="text" name="title" placeholder="Leave blank to use the name">
+      </label>
+
+      <label class="field">
+        <span class="field-label">Chapter</span>
+        <input class="input" type="text" name="chapter" placeholder="Leave blank for a new chapter">
+      </label>
+    </div>
+
+    <div class="options-actions">
+      <button class="button button-primary" type="submit">Add the track</button>
+      <a class="button" href="{{ url_for('web.card', card_id=card_id) }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

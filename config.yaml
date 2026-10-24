@@ -1,0 +1,84 @@
+# yotaiman configuration.
+#
+# This file chooses which music and speech generators the service runs.
+# Environment variables override anything set here, so secrets never have to
+# live in this file.
+
+service:
+  host: 127.0.0.1
+  port: 8787
+  debug: false
+
+daily:
+  # Leave empty to have the service create and remember its own card.
+  card_id: ""
+  # replace = one story per day; history = keep the last N days as chapters
+  mode: replace
+  history_days: 7
+
+generators:
+  # ---------------------------------------------------------------
+  # Music
+  # ---------------------------------------------------------------
+  music:
+    default: ace-step-local
+
+    options:
+      # A local ACE-Step 1.5 API server.
+      #   python -m acestep.api_server --host 127.0.0.1 --port 8001
+      # Docs: https://ace-step.github.io/ACE-Step-1.5/en/INFERENCE
+      ace-step-local:
+        type: ace-step
+        enabled: true
+        endpoint: http://127.0.0.1:8001
+        # Set ACESTEP_API_KEY in the environment if the server requires one.
+        api_key_env: ACESTEP_API_KEY
+        model: acestep-v15-turbo
+        timeout: 900
+        poll_interval: 5
+        # Defaults for every request; a request may override any of them.
+        defaults:
+          audio_format: mp3
+          audio_duration: 60
+          inference_steps: 8
+          thinking: true
+          instrumental: true
+
+      # A procedural placeholder. No model, no GPU -- useful for testing
+      # the track pipeline end to end.
+      synth:
+        type: synth
+        enabled: true
+        base_frequency: 220
+
+  # ---------------------------------------------------------------
+  # Speech
+  # ---------------------------------------------------------------
+  speech:
+    default: say
+
+    options:
+      # macOS say. No credentials, no server.
+      say:
+        type: say
+        enabled: true
+        voice: Karen
+
+      # A local TTS model server. The contract is:
+      #   POST <url>  {"text": "...", "voice": "..."}  ->  audio bytes
+      # Kokoro, MLX-Audio and similar can be wrapped in a few lines.
+      local-model:
+        type: http
+        enabled: false
+        url: http://127.0.0.1:8880/tts
+        voice: default
+        timeout: 300
+
+      # A hosted service. api_key_env keeps the key out of this file.
+      hosted:
+        type: http
+        enabled: false
+        url: https://api.elevenlabs.io/v1/text-to-speech/{voice}
+        api_key_env: ELEVENLABS_API_KEY
+        voice: rachel
+        timeout: 120

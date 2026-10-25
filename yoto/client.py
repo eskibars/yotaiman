@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import time
 from typing import Any
 
@@ -12,12 +13,23 @@ from .errors import ApiError, AuthError, NotFound, ValidationError
 
 API_BASE = "https://api.yotoplay.com"
 
+
+def _user_agent() -> str:
+    """A browser-shaped User-Agent that matches the platform we run on."""
+    token = {
+        "Windows": "Windows NT 10.0; Win64; x64",
+        "Darwin": "Macintosh; Intel Mac OS X 10_15_7",
+        "Linux": "X11; Linux x86_64",
+    }.get(platform.system(), "X11; Linux x86_64")
+    return f"Mozilla/5.0 ({token}) AppleWebKit/537.36"
+
+
 #: The API only accepts browser-originated calls; it rejects requests with no
 #: ``Origin``/``Referer`` pair.
 BROWSER_HEADERS = {
     "Origin": "https://my.yotoplay.com",
     "Referer": "https://my.yotoplay.com/",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "User-Agent": _user_agent(),
 }
 
 

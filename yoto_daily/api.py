@@ -39,6 +39,14 @@ def _state():
     return current_app.config["YOTO_STATE"]
 
 
+def _token_refresh() -> dict[str, Any]:
+    """What the background token refresher is doing."""
+    refresher = current_app.extensions.get("token_refresher")
+    if refresher is None:
+        return {"enabled": False, "running": False}
+    return refresher.status()
+
+
 def _error(message: str, status: int = 400, **extra: Any):
     payload = {"ok": False, "error": message}
     payload.update(extra)
@@ -142,6 +150,7 @@ def index():
             "ok": True,
             "service": "yotaiman",
             "session": session,
+            "token_refresh": _token_refresh(),
             "daily_card_id": state.get("daily_card_id", ""),
             "last_run": state.get("last_run", ""),
             "capabilities": caps.names(),
@@ -194,6 +203,7 @@ def health():
             "ok": True,
             "service": "yotaiman",
             "session": session,
+            "token_refresh": _token_refresh(),
             "daily_card_id": state.get("daily_card_id", ""),
             "last_run": state.get("last_run", ""),
             "capabilities": caps.names(),

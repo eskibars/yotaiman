@@ -42,6 +42,9 @@ class ReadAloudCapability(Capability):
          "description": "'replace' (default) or 'append'."},
         {"name": "voice", "type": "string", "required": False,
          "description": "TTS voice. Defaults to the configured one."},
+        {"name": "instruction", "type": "string", "required": False,
+         "description": "How to read it, e.g. 'unhurried and warm'. "
+                        "Overrides the configured delivery."},
         {"name": "dry_run", "type": "boolean", "required": False,
          "description": "Render the audio but do not touch a card."},
     ]
@@ -72,8 +75,10 @@ class ReadAloudCapability(Capability):
     def tts(self) -> TTSBackend:
         if self._tts is None:
             self._tts = build_tts_backend(
+                prefer=self.settings.tts_backend,
                 say_command=self.settings.tts_command,
                 ffmpeg_command=self.settings.ffmpeg_command,
+                ming_options=self.settings.ming_tts_options,
             )
         return self._tts
 
@@ -87,6 +92,7 @@ class ReadAloudCapability(Capability):
 
         title = (params.get("title") or "Read aloud").strip()
         voice = (params.get("voice") or "").strip() or self.settings.tts_voice
+        instruction = (params.get("instruction") or "").strip()
         mode = (params.get("mode") or "replace").strip().lower()
         dry_run = bool(params.get("dry_run"))
 
@@ -94,14 +100,17 @@ class ReadAloudCapability(Capability):
         work.mkdir(parents=True, exist_ok=True)
         audio_path = work / "read-aloud.mp3"
 
-        audio = self.tts.synthesize(text, audio_path, voice=voice)
+        audio = self.tts.synthesize(
+            text, audio_path, voice=voice, instruction=instruction
+        )
         if not audio_path.exists():
             raise RuntimeError("text-to-speech produced no audio file")
 
         result: dict[str, Any] = {
             "title": title,
             "characters": len(text),
-            "voice": voice,
+            "voice": audio.voice or voice,
+            "instruction": instruction,
             "tts_backend": audio.backend,
             "audio_duration": round(audio.duration, 2),
             "audio_path": str(audio_path),

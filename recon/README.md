@@ -37,9 +37,19 @@ The Node tools need a Chrome running with the DevTools protocol enabled, and
 the logged-in Yoto tab open:
 
 ```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --remote-debugging-port=9222
+# Chrome 136+ ignores --remote-debugging-port for the default profile,
+# so turn remote debugging on instead:
+#   chrome://inspect/#remote-debugging  ->  Enable
+#
+# Or start a separate Chrome on a throwaway profile:
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/yoto-debug
 ```
+
+`cdp.mjs` finds the browser endpoint the same way the Python SDK does: it
+reads the `DevToolsActivePort` file Chrome writes into the profile directory,
+so it works against a browser started through `chrome://inspect` as well as
+one started with `--remote-debugging-port`. Set `YOTO_CHROME_USER_DATA_DIR` if
+the profile is somewhere else.
 
 ## The tools
 

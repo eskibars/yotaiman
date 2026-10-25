@@ -27,6 +27,7 @@ from yoto_daily.content.text import (  # noqa: E402
     build_text_source,
 )
 from yoto_daily.state import StateStore  # noqa: E402
+from yoto_daily.tracks import TrackRequest  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -55,6 +56,28 @@ def test_track_from_dict():
     assert track.media_id == "x" * 43
     assert track.icon_media_id == "y" * 43
     assert track.to_dict()["trackUrl"].startswith("yoto:#")
+
+
+def test_track_request_carries_an_instruction():
+    """A request may ask for a different delivery than the default."""
+    request = TrackRequest.from_dict(
+        {
+            "type": "generate",
+            "kind": "text-to-speech",
+            "text": "Once upon a time",
+            "instruction": "unhurried and warm",
+        }
+    )
+    assert request.params["instruction"] == "unhurried and warm"
+
+    nested = TrackRequest.from_dict(
+        {
+            "type": "generate",
+            "kind": "text-to-speech",
+            "params": {"text": "Once upon a time", "instruction": "excited"},
+        }
+    )
+    assert nested.params["instruction"] == "excited"
 
 
 def test_card_content_round_trip():
@@ -206,6 +229,12 @@ def test_capabilities_are_registered(client):
     names = [c["name"] for c in body["capabilities"]]
     assert "daily-story" in names
     assert "read-aloud" in names
+
+
+def test_the_add_track_form_offers_an_instruction_field(client):
+    page = client.get("/cards/some-card/add").get_data(as_text=True)
+    assert 'name="instruction"' in page
+    assert "How to read it" in page
 
 
 def test_topics_listing(client):

@@ -15,6 +15,7 @@ from .base import (
     MusicSpec,
     SpeechGenerator,
 )
+from .ming_tts import MingTTSSpeechGenerator, build_ming_tts_generator
 from .music import AceStepMusicGenerator, SynthMusicGenerator
 from .registry import (
     GeneratorError,
@@ -32,11 +33,13 @@ __all__ = [
     "MusicSpec",
     "SpeechGenerator",
     "AceStepMusicGenerator",
+    "MingTTSSpeechGenerator",
     "SynthMusicGenerator",
     "SaySpeechGenerator",
     "HTTPSpeechGenerator",
     "GeneratorRegistry",
     "GeneratorError",
+    "build_ming_tts_generator",
     "build_registry",
     "default_registry",
 ]

@@ -182,8 +182,21 @@ class SpeechGenerator(Generator):
     kind = "speech"
 
     @abstractmethod
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
-        """Render ``text`` into an audio file at ``out_path``."""
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
+        """Render ``text`` into an audio file at ``out_path``.
+
+        ``voice`` picks a voice and ``instruction`` describes the delivery.
+        Both are optional overrides of what the generator was configured
+        with, so one request can be read differently from the next without
+        touching the configuration.
+        """
 
 
 def parse_speech_result(payload: bytes, out_path: Path, backend: str) -> AudioResult:

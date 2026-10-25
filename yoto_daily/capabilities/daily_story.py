@@ -45,6 +45,9 @@ class DailyStoryCapability(Capability):
          "description": "Name to address the listener as."},
         {"name": "voice", "type": "string", "required": False,
          "description": "TTS voice. Defaults to the configured one."},
+        {"name": "instruction", "type": "string", "required": False,
+         "description": "How to read the story, e.g. 'unhurried and warm'. "
+                        "Overrides the configured delivery."},
         {"name": "title", "type": "string", "required": False,
          "description": "Override the generated title."},
         {"name": "dry_run", "type": "boolean", "required": False,
@@ -92,8 +95,10 @@ class DailyStoryCapability(Capability):
     def tts(self) -> TTSBackend:
         if self._tts is None:
             self._tts = build_tts_backend(
+                prefer=self.settings.tts_backend,
                 say_command=self.settings.tts_command,
                 ffmpeg_command=self.settings.ffmpeg_command,
+                ming_options=self.settings.ming_tts_options,
             )
         return self._tts
 
@@ -102,6 +107,7 @@ class DailyStoryCapability(Capability):
         topic = (params.get("topic") or "").strip() or None
         child_name = (params.get("child_name") or "").strip()
         voice = (params.get("voice") or "").strip() or self.settings.tts_voice
+        instruction = (params.get("instruction") or "").strip()
         dry_run = bool(params.get("dry_run"))
 
         story = self.text_source.generate(topic, child_name=child_name)
@@ -112,7 +118,9 @@ class DailyStoryCapability(Capability):
         work.mkdir(parents=True, exist_ok=True)
         audio_path = work / "story.mp3"
 
-        audio = self.tts.synthesize(story.body, audio_path, voice=voice)
+        audio = self.tts.synthesize(
+            story.body, audio_path, voice=voice, instruction=instruction
+        )
         if not audio_path.exists():
             raise RuntimeError("text-to-speech produced no audio file")
 
@@ -121,7 +129,8 @@ class DailyStoryCapability(Capability):
             "title": story.title,
             "text": story.body,
             "text_backend": story.backend,
-            "voice": voice,
+            "voice": audio.voice or voice,
+            "instruction": instruction,
             "tts_backend": audio.backend,
             "audio_duration": round(audio.duration, 2),
             "audio_path": str(audio_path),

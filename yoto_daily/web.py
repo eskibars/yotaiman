@@ -93,7 +93,13 @@ def _state():
 def index():
     yoto = _yoto()
     state = _state()
-    cards = yoto.cards.list()
+    # A lapsed session must not turn the desk into an error page: the point
+    # of the page is to say what is wrong, so the shelf is fetched defensively
+    # and the banner below explains the rest.
+    try:
+        cards = yoto.cards.list()
+    except Exception:
+        cards = []
 
     daily_id = state.get("daily_card_id", "") or _settings().daily_card_id
     daily_card = None
@@ -106,8 +112,17 @@ def index():
     try:
         yoto.auth.whoami()
         session_ok = True
-    except Exception:
+        session_error = ""
+    except Exception as exc:
         session_ok = False
+        session_error = str(exc)
+
+    # The background refresher reports what it last managed to do, so a
+    # session that has lapsed is visible before it turns into a failed
+    # request.
+    refresher = current_app.extensions.get("token_refresher")
+    refresh = refresher.status() if refresher is not None else {"enabled": False}
+    refresh_error = refresh.get("error", "") if refresh.get("last_ok") is False else ""
 
     return render_template(
         "index.html",
@@ -117,6 +132,9 @@ def index():
         last_story=state.get("last_story", {}),
         last_run=state.get("last_run", ""),
         session_ok=session_ok,
+        session_error=session_error,
+        refresh=refresh,
+        refresh_error=refresh_error,
         duration=_duration,
         edge=_card_edge,
         plural=_plural,
@@ -156,6 +174,20 @@ def add_track(card_id: str):
     )
 
 
+def _first_filled(form: Any, name: str) -> str:
+    """The first non-empty value of a form field.
+
+    The add-track form shows an instruction field in more than one panel,
+    and a browser submits all of them; ``form.get`` would return the first
+    one even when it is the empty one.
+    """
+    for value in form.getlist(name):
+        value = (value or "").strip()
+        if value:
+            return value
+    return ""
+
+
 @web.post("/cards/<card_id>/add")
 def add_track_submit(card_id: str):
     form = request.form
@@ -188,12 +220,14 @@ def add_track_submit(card_id: str):
             params = {
                 "source": form.get("source", "").strip(),
                 "chapters": form.get("chapters", "").strip(),
+                "instruction": _first_filled(form, "instruction"),
             }
         else:
             kind = "text-to-speech"
             params = {
                 "text": form.get("text", "").strip(),
                 "voice": form.get("voice", "").strip(),
+                "instruction": _first_filled(form, "instruction"),
             }
         params = {k: v for k, v in params.items() if v not in ("", None)}
 

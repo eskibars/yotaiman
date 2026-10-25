@@ -32,8 +32,11 @@ git clone https://github.com/eskibars/yotaiman
 cd yotaiman
 pip install -e .            # or: pip install -e '.[dev]'
 
+# 0. Copy the settings file and adjust it.  Every value has a working default.
+cp .env.example .env
+
 # 1. Copy the login cookies out of a logged-in Chrome.
-#    Chrome must be running with:  --remote-debugging-port=9222
+#    Turn on remote debugging first:  chrome://inspect/#remote-debugging -> Enable
 python -m yoto.auth bootstrap
 
 # 2. Publish today's story.
@@ -220,6 +223,7 @@ yoto/                    the SDK
   models.py              Card / CardContent / Chapter / Track
   errors.py              exception hierarchy
   _ws.py                 stdlib WebSocket, used by the cookie bootstrap
+  _cdp.py                finds the Chrome DevTools endpoint
 
 yoto_daily/              the service
   app.py                 Flask application, registers both blueprints
@@ -227,6 +231,7 @@ yoto_daily/              the service
   web.py                 the HTML control desk blueprint (/)
   config.py              settings: config.yaml plus the environment
   state.py               small JSON state store
+  token_refresher.py     keeps the access token fresh in the background
   tracks.py              the track service (stream / file / generate)
   generators/            music and speech generators
     base.py              MusicSpec, MusicGenerator, SpeechGenerator
@@ -407,7 +412,11 @@ the track pipeline can be exercised without a GPU.
 ### Speech
 
 **`say`** uses macOS `say`, which needs no credentials and has voices for most
-locales (`Karen` en_AU, `Samantha` en_US, `Daniel` en_GB, `Junior`).
+locales (`Karen` en_AU, `Samantha` en_US, `Daniel` en_GB, `Junior`). It only
+exists on macOS — elsewhere it stays in the catalogue but reports itself as
+unavailable, and a request that needs narration picks another generator that
+does work. If none does, the service says which backend is missing instead of
+failing mid-story.
 
 **`http`** covers both a local model server and a hosted service with one
 implementation. The contract is:
@@ -420,6 +429,87 @@ A JSON response containing base64 audio under `audio` or `data` also works.
 Kokoro, MLX-Audio and similar servers need only a few lines of glue to that
 contract; the URL may contain `{voice}` and `{text}` placeholders if the
 service prefers path parameters.
+
+**`ming-tts`** narrates in a voice cloned from a recording, using the local
+[Ming-3.0-tts](https://github.com/inclusionAI/Ming-3.0-tts) checkpoint. It is
+the only generator that pulls a model into the service process, so it fetches
+the checkpoint on first use and keeps it warm afterwards.
+
+It needs two things: the inference code from the GitHub checkout, and the
+weights from the Hub.
+
+```bash
+# the inference code
+git clone https://github.com/inclusionAI/Ming-3.0-tts
+
+# the runtime, in the environment that runs the service
+pip install --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.6.0 torchaudio==2.6.0
+pip install transformers==4.46.3 accelerate==1.3.0 x_transformers==2.9.2 \
+    diffusers==0.33.0 onnxruntime soundfile==0.12.1 inflect einops \
+    loguru tqdm huggingface_hub
+```
+
+Then point `config.yaml` at both and pick a voice:
+
+```yaml
+generators:
+  speech:
+    default: voice          # the daily story follows this too
+    options:
+      voice:
+        type: ming-tts
+        code_path: ../Ming-3.0-tts
+        model_path: ../Ming-3.0-tts/models/Ming-3.0-tts-0.5b
+        reference_wav: ~/yotaiman/my_voice.wav
+        reference_text: "the exact words spoken in the clip"
+        instruction: "Speak in a warm, intimate storytelling voice, unhurried."
+```
+
+`reference_wav` is four to eight seconds of clean speech and
+`reference_text` is the **exact** transcript of it — the model conditions on
+the words, so a summary of what was said will not clone the voice properly.
+Leave `model_path` empty and the checkpoint is pulled from the Hub into
+`cache_dir` on first use instead.
+
+Several voices can live side by side and be picked by name with the `voice`
+parameter:
+
+```yaml
+        voices:
+          dad:
+            reference_wav: ~/yotaiman/dad.wav
+            reference_text: "the exact words spoken in dad.wav"
+            instruction: "Speak in a warm, intimate storytelling voice, unhurried."
+```
+
+Two details are worth knowing. The model caps one generation at a fixed
+number of positions, so a long paragraph is split at clause boundaries and
+rendered in pieces — the generator does this itself and joins the pieces
+with a short pause. And the whole thing runs about three times slower than
+realtime on a CPU, which is fine for a card that is refreshed once a day.
+
+Text normalization uses FST grammars that need `pynini`, which has no
+Windows wheel; set `text_normalization: false` there.
+
+**Overriding the delivery per request.** The `instruction` in the
+configuration is the default. Any request may replace it, which is how one
+voice reads a story differently from another:
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/cards/<card_id>/tracks \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "type": "generate",
+        "kind": "text-to-speech",
+        "text": "Once upon a time...",
+        "instruction": "excited, like a child hearing it for the first time"
+      }'
+```
+
+The same key works on `read-book` tracks, on the `read-aloud` and
+`daily-story` capabilities, and on the add-track form, where it is the
+**How to read it** field. Generators that cannot honour it ignore it.
 
 ### Adding a generator
 
@@ -465,6 +555,12 @@ installation.
 Every setting is an environment variable; see `.env.example` for the full list
 with defaults.
 
+Copy `.env.example` to `.env` and edit it — the command line tools
+(`yotaiman`, `python -m yoto_daily`, `python -m yoto.auth`) read that file on
+startup, so the same setup works on a machine with no shell profile. A value
+already exported in the shell wins over the file, and the file is only read by
+the command line: importing the library leaves the environment alone.
+
 | variable | default | meaning |
 |---|---|---|
 | `YOTO_STATE_DIR` | `~/.config/yotaiman` | cookies, token, state, audio |
@@ -474,11 +570,15 @@ with defaults.
 | `YOTO_DAILY_MODE` | `replace` | `replace` (one story/day) or `history` (keep N days) |
 | `YOTO_HISTORY_DAYS` | `7` | how many days `history` keeps |
 | `YOTO_TTS_VOICE` | `Karen` | macOS `say` voice |
+| `YOTO_TTS_BACKEND` | `auto` | `auto`, `say`, `http` or `ming-tts`; follows `generators.speech.default` |
+| `YOTO_MING_TTS_CODE_PATH` | *(empty)* | where the Ming-3.0-tts checkout lives |
 | `YOTO_LLM_BACKEND` | `auto` | `auto`, `template`, `script` or `openai` |
 
 The state directory was called `~/.config/yoto-daily` before the project was
 renamed. If that directory exists and the new one does not, it is still used,
-so upgrading does not force a fresh login.
+so upgrading does not force a fresh login. The path is the same on every
+platform — on Windows `~/.config/yotaiman` means
+`C:\Users\<you>\.config\yotaiman` — and `YOTO_STATE_DIR` overrides it.
 
 ### Text generation
 
@@ -500,6 +600,16 @@ The default is macOS `say`, which needs no API key and has voices for most
 locales — `Karen` (en_AU), `Samantha` (en_US), `Daniel` (en_GB), `Junior`.
 The output goes through `ffmpeg` to a mono MP3, which is what Yoto's
 transcoder wants.
+
+On Windows and Linux there is no `say`, so enable one of the other backends in
+`config.yaml` — `ming-tts`, `local-model` or `hosted`. The generator that a
+request picks is the configured default when it can run, and otherwise the
+first one that can, so a config carried over from a Mac still works.
+
+Set `generators.speech.default` to a `ming-tts` generator and the daily
+story and read-aloud capabilities narrate in that cloned voice as well, so
+one switch moves the whole service over. `YOTO_TTS_BACKEND` overrides the
+choice directly.
 
 ---
 
@@ -531,6 +641,93 @@ Refresh the cookie jar whenever the session lapses:
 python -m yoto.auth bootstrap     # re-copy from Chrome
 python -m yoto.auth status        # what is cached right now
 ```
+
+### Keeping the token warm while the service runs
+
+`yotaiman serve` refreshes the token in the background, every hour by
+default. A token lasts eight hours, so an hourly refresh means it is always
+fresh when a request needs it and a long run never trips over an expired
+one.
+
+The refresh is plain HTTP — the stored cookies are replayed, Auth0 is asked
+for a code, the code is swapped for a token — so **no browser is needed
+while the service runs and none has to be kept open**. Chrome is only
+required for the one-off `bootstrap` that copies the cookie jar onto disk.
+
+```bash
+yotaiman serve
+# yotaiman listening on http://127.0.0.1:8787
+# Refreshing the access token every 1 h in the background.
+# [token] token refreshed, valid for 8.0 h
+```
+
+The interval is configurable, and `0` turns the refresher off:
+
+```bash
+YOTO_TOKEN_REFRESH_INTERVAL=1800 yotaiman serve   # every 30 minutes
+```
+
+```yaml
+service:
+  token_refresh_interval: 3600
+```
+
+What the refresher last managed to do is part of the service status, so a
+session that has genuinely lapsed is visible before it turns into a failed
+request:
+
+```bash
+curl -s http://127.0.0.1:8787/api/health | jq .token_refresh
+```
+
+```json
+{
+  "enabled": true,
+  "running": true,
+  "interval": 3600,
+  "last_refresh": "2026-10-25T11:38:16+00:00",
+  "last_ok": true,
+  "error": "",
+  "next_refresh": "2026-10-25T12:38:16+00:00",
+  "expires_at": "2026-10-25T19:38:16+00:00",
+  "expires_in": 28793
+}
+```
+
+When a refresh fails, the desk says so at the top of the page and the error
+carries the instructions for putting it right.
+
+### Getting a DevTools endpoint
+
+`bootstrap` reads the cookies straight out of a running Chrome over the
+DevTools protocol. It finds the browser endpoint the same way the DevTools
+frontend does, so it works on macOS, Windows and Linux, and on both ways of
+exposing Chrome:
+
+| how Chrome was started | where the endpoint comes from |
+|---|---|
+| `chrome://inspect/#remote-debugging` → Enable | the `DevToolsActivePort` file Chrome writes into the profile directory |
+| `--remote-debugging-port=9222` with a non-default `--user-data-dir` | the `/json/version` HTTP endpoint |
+
+**Since Chrome 136, `--remote-debugging-port` is ignored for the default
+profile directory.** A Chrome started the old way still looks like it is
+listening on 9222 but serves nothing useful. Two consequences:
+
+- For your everyday profile, turn on remote debugging at
+  `chrome://inspect/#remote-debugging` → Enable. That is the route the
+  bootstrap expects.
+- A browser started with `--remote-debugging-port` and a *throwaway*
+  `--user-data-dir` serves the older `/json/version` endpoint. The bootstrap
+  accepts that too, but a throwaway profile is not signed in to Yoto, so sign
+  in there first.
+
+Chrome holds on to a debugging session for a while after a client
+disconnects, and while it does it accepts new connections without ever
+completing the handshake. If the bootstrap reports that Chrome accepted the
+connection but never answered, leave the browser alone and run it again —
+retrying straight away keeps Chrome busy, and ten quiet minutes is what it
+took here. If it does not clear, turn remote debugging off and on again at
+`chrome://inspect/#remote-debugging`.
 
 ---
 

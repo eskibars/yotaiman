@@ -25,6 +25,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,11 +113,14 @@ class YotoAuth:
         cache_file: Path | str | None = None,
         session: requests.Session | None = None,
     ) -> None:
-        self.state_dir = Path(state_dir or DEFAULT_STATE_DIR)
+        self.state_dir = Path(state_dir) if state_dir else default_state_dir()
         self.cookies_file = Path(cookies_file or self.state_dir / "cookies.json")
         self.cache_file = Path(cache_file or self.state_dir / "token.json")
         self._session = session or requests.Session()
         self._cached: CachedToken | None = None
+        #: Guards the token cache, so a request thread and a background
+        #: refresher never mint two tokens at the same moment.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # cookie jar
@@ -163,9 +167,8 @@ class YotoAuth:
     # ------------------------------------------------------------------
     # token cache
     # ------------------------------------------------------------------
-    def load_cached_token(self) -> CachedToken | None:
-        if self._cached is not None:
-            return self._cached
+    def _read_token_file(self) -> CachedToken | None:
+        """Parse the token cache on disk, or ``None`` when there is none."""
         if not self.cache_file.exists():
             return None
         try:
@@ -178,7 +181,14 @@ class YotoAuth:
             )
         except (json.JSONDecodeError, KeyError, OSError, ValueError):
             return None
-        self._cached = token
+        return token
+
+    def load_cached_token(self) -> CachedToken | None:
+        if self._cached is not None:
+            return self._cached
+        token = self._read_token_file()
+        if token is not None:
+            self._cached = token
         return token
 
     def _store_token(self, data: dict[str, Any]) -> CachedToken:
@@ -190,7 +200,11 @@ class YotoAuth:
             id_token=data.get("id_token", ""),
         )
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_file.write_text(
+        # Written to a temporary file and moved into place.  The refresher
+        # writes from its own thread while request threads read, and a reader
+        # must never catch half a token.
+        tmp = self.cache_file.with_name(f"{self.cache_file.name}.{os.getpid()}.tmp")
+        tmp.write_text(
             json.dumps(
                 {
                     "access_token": token.access_token,
@@ -201,6 +215,7 @@ class YotoAuth:
                 indent=2,
             )
         )
+        tmp.replace(self.cache_file)
         try:
             self.cache_file.chmod(0o600)
         except OSError:  # pragma: no cover
@@ -283,16 +298,28 @@ class YotoAuth:
         return data
 
     def get_token(self, *, force_refresh: bool = False) -> CachedToken:
-        """Return a valid access token, refreshing it if needed."""
-        if not force_refresh:
-            cached = self.load_cached_token()
-            if cached and cached.seconds_left > 300:
-                return cached
+        """Return a valid access token, refreshing it if needed.
 
-        sess = self._session_with_cookies()
-        code, verifier = self._authorize(sess)
-        data = self._exchange(sess, code, verifier)
-        return self._store_token(data)
+        The lock keeps a request thread and the background refresher from
+        minting two tokens at once.
+        """
+        with self._lock:
+            if not force_refresh:
+                cached = self.load_cached_token()
+                if cached and cached.seconds_left > 300:
+                    return cached
+                # Another process may have refreshed the cache since this one
+                # read it -- a service running alongside a CLI command, say --
+                # so look at the file again before minting a token of our own.
+                on_disk = self._read_token_file()
+                if on_disk and on_disk.seconds_left > 300:
+                    self._cached = on_disk
+                    return on_disk
+
+            sess = self._session_with_cookies()
+            code, verifier = self._authorize(sess)
+            data = self._exchange(sess, code, verifier)
+            return self._store_token(data)
 
     def get_access_token(self, *, force_refresh: bool = False) -> str:
         """Return just the bearer token string."""

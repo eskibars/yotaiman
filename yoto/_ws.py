@@ -26,6 +26,10 @@ class WebSocketError(RuntimeError):
     """Raised when the socket handshake or frame stream goes wrong."""
 
 
+class WebSocketTimeout(WebSocketError):
+    """Raised when the peer accepted the connection but stopped answering."""
+
+
 class WebSocket:
     """A blocking client WebSocket."""
 
@@ -55,7 +59,12 @@ class WebSocket:
         )
         self._sock.sendall(handshake.encode())
 
-        header = self._read_until(b"\r\n\r\n")
+        try:
+            header = self._read_until(b"\r\n\r\n")
+        except socket.timeout as exc:
+            raise WebSocketTimeout(
+                "the server accepted the connection but never completed the handshake"
+            ) from exc
         status_line = header.split(b"\r\n", 1)[0].decode(errors="replace")
         if "101" not in status_line:
             raise WebSocketError(f"handshake failed: {status_line}")
@@ -149,6 +158,10 @@ class WebSocket:
 
         self.send(json.dumps(payload))
 
+    def set_timeout(self, timeout: float) -> None:
+        """Change the socket timeout used by later reads and writes."""
+        self._sock.settimeout(timeout)
+
     def recv_json(self) -> Any:
         """Receive and decode the next JSON message."""
         import json
@@ -156,9 +169,25 @@ class WebSocket:
         return json.loads(self.recv())
 
     def close(self) -> None:
-        """Close the socket."""
+        """Close the socket politely.
+
+        The close handshake is not optional.  Chrome's DevTools server keeps a
+        session registered until it sees a proper close, and dropping a socket
+        that still has unread data in its receive buffer sends a reset instead
+        of a clean shutdown -- which the server records as a broken session and
+        it then stops answering new WebSocket upgrades.  So send the CLOSE
+        frame, drain whatever the peer sends back, and only then drop the
+        connection.
+        """
         try:
             self._send_frame(OP_CLOSE, b"")
+        except Exception:
+            pass
+        try:
+            self._sock.settimeout(1.0)
+            while True:
+                if not self._sock.recv(65536):
+                    break
         except Exception:
             pass
         try:

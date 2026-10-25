@@ -6,6 +6,10 @@ is that the backend produces a file the transcoder can read.
 ``say`` is the default because macOS ships it: it needs no API key, has
 dozens of voices, and is fast enough for a daily job.  The HTTP backend is
 there for when a cloud voice is preferred.
+
+``say`` only exists on macOS.  On Windows and Linux, enable one of the other
+backends -- ``ming-tts``, a local model server or a hosted voice -- or
+:func:`build_tts_backend` raises rather than narrating with nothing.
 """
 
 from __future__ import annotations
@@ -34,8 +38,19 @@ class TTSBackend(ABC):
     name = "base"
 
     @abstractmethod
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
-        """Render ``text`` into ``out_path``."""
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
+        """Render ``text`` into ``out_path``.
+
+        ``instruction`` describes the delivery and overrides whatever the
+        backend was configured with.
+        """
 
     def available(self) -> bool:
         return True
@@ -60,7 +75,14 @@ class MacSayBackend(TTSBackend):
     def available(self) -> bool:
         return bool(shutil.which(self.say_command))
 
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
         if not self.available():
             raise RuntimeError(f"{self.say_command} is not on PATH")
 
@@ -120,19 +142,36 @@ class HTTPVoiceBackend(TTSBackend):
     def available(self) -> bool:
         return bool(self.url)
 
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
         import json
 
         import requests
+
+        if not self.url:
+            raise RuntimeError(
+                "no HTTP TTS endpoint is configured; set the url option or "
+                "generators.speech.options.<name>.url"
+            )
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        payload: dict[str, Any] = {"text": text, "voice": voice}
+        if instruction:
+            payload["instruction"] = instruction
+
         resp = requests.post(
             self.url,
-            data=json.dumps({"text": text, "voice": voice}),
+            data=json.dumps(payload),
             headers=headers,
             timeout=self.timeout,
         )
@@ -145,6 +184,53 @@ class HTTPVoiceBackend(TTSBackend):
             voice=voice,
             backend=self.name,
         )
+
+
+class MingTTSBackend(TTSBackend):
+    """Narrates with the Ming-3.0-tts checkpoint and a cloned voice.
+
+    The heavy lifting lives in the speech generator; this is the thin
+    adapter the capabilities speak to.  The generator keeps the model warm
+    between calls, so the second story of the day costs nothing extra to
+    load.
+    """
+
+    name = "ming-tts"
+
+    def __init__(self, generator: Any) -> None:
+        self.generator = generator
+
+    def available(self) -> bool:
+        try:
+            return bool(self.generator.available())
+        except Exception:
+            return False
+
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
+        result = self.generator.synthesize(
+            text, out_path, voice=voice, instruction=instruction
+        )
+        return AudioResult(
+            path=result.path,
+            duration=result.duration,
+            voice=result.voice,
+            backend=result.backend,
+        )
+
+    def describe(self) -> dict[str, Any]:
+        info = {"backend": self.name, "available": self.available()}
+        try:
+            info["detail"] = self.generator.detail()
+        except Exception:
+            info["detail"] = ""
+        return info
 
 
 def _probe_duration(path: Path, ffmpeg_command: str = "ffmpeg") -> float:
@@ -175,11 +261,24 @@ def build_tts_backend(
     ffmpeg_command: str = "ffmpeg",
     http_url: str = "",
     http_api_key: str = "",
+    ming_options: dict[str, Any] | None = None,
 ) -> TTSBackend:
     """Pick a TTS backend."""
+    if prefer == "ming-tts":
+        from ..generators.ming_tts import build_ming_tts_generator
+
+        return MingTTSBackend(build_ming_tts_generator("ming-tts", dict(ming_options or {})))
     if prefer == "http" and http_url:
         return HTTPVoiceBackend(http_url, api_key=http_api_key)
     say = MacSayBackend(say_command, ffmpeg_command)
     if prefer == "say":
         return say
-    return say if say.available() else HTTPVoiceBackend(http_url, api_key=http_api_key)
+    if say.available():
+        return say
+    if http_url:
+        return HTTPVoiceBackend(http_url, api_key=http_api_key)
+    raise RuntimeError(
+        "no TTS backend is available: macOS `say` is not on PATH and no HTTP "
+        "endpoint is configured. Enable a speech generator in config.yaml "
+        "(ming-tts, local-model or hosted) or point YOTO_TTS_BACKEND at one."
+    )

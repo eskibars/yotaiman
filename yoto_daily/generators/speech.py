@@ -72,7 +72,14 @@ class SaySpeechGenerator(SpeechGenerator):
             return f"{self.say_command} is not on PATH"
         return f"voice {self.voice or '(system default)'}"
 
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
         if not self.available():
             raise RuntimeError(f"{self.say_command} is not on PATH")
 
@@ -169,7 +176,14 @@ class HTTPSpeechGenerator(SpeechGenerator):
     def detail(self) -> str:
         return f"HTTP endpoint at {self.url}"
 
-    def synthesize(self, text: str, out_path: Path, *, voice: str = "") -> AudioResult:
+    def synthesize(
+        self,
+        text: str,
+        out_path: Path,
+        *,
+        voice: str = "",
+        instruction: str = "",
+    ) -> AudioResult:
         import json
 
         import requests
@@ -184,6 +198,10 @@ class HTTPSpeechGenerator(SpeechGenerator):
 
         url = self.url
         body: dict[str, Any] = {"text": text, "voice": chosen, "input": text}
+        if instruction:
+            # Endpoints that do not know the key ignore it; the ones that
+            # speak about delivery use it.
+            body["instruction"] = instruction
         if "{voice}" in url:
             url = url.replace("{voice}", chosen)
         if "{text}" in url:

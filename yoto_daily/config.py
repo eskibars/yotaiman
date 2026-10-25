@@ -62,7 +62,7 @@ def load_config_file(path: Path | str) -> dict[str, Any]:
 class Settings:
     """Everything the service needs to know."""
 
-    state_dir: Path = field(default_factory=lambda: DEFAULT_STATE_DIR)
+    state_dir: Path = field(default_factory=default_state_dir)
     config_file: Path = field(default_factory=lambda: DEFAULT_CONFIG_FILE)
     raw_config: dict[str, Any] = field(default_factory=dict)
 
@@ -92,6 +92,13 @@ class Settings:
         default_factory=lambda: os.environ.get("YOTO_FFMPEG_COMMAND", "ffmpeg")
     )
 
+    #: Which backend the capabilities narrate with: ``auto``, ``say``,
+    #: ``http`` or ``ming-tts``.  When the configured default speech
+    #: generator is a Ming-3.0-tts one, this follows it automatically.
+    tts_backend: str = field(
+        default_factory=lambda: os.environ.get("YOTO_TTS_BACKEND", "auto")
+    )
+
     #: ``auto`` picks the first configured LLM backend that works.
     llm_backend: str = field(
         default_factory=lambda: os.environ.get("YOTO_LLM_BACKEND", "auto")
@@ -117,6 +124,13 @@ class Settings:
         default_factory=lambda: _env_bool("YOTO_ALLOW_REMOTE", False)
     )
 
+    #: How often the background worker refreshes the access token, in
+    #: seconds.  The token lasts eight hours, so the default of an hour
+    #: keeps it warm.  Zero turns the refresher off.
+    token_refresh_interval: int = field(
+        default_factory=lambda: _env_int("YOTO_TOKEN_REFRESH_INTERVAL", 3600)
+    )
+
     @classmethod
     def load(cls, path: Path | str | None = None) -> "Settings":
         """Build settings from a config file plus the environment."""
@@ -131,6 +145,10 @@ class Settings:
             settings.port = int(service["port"])
         if service.get("debug") is not None and not os.environ.get("YOTO_DEBUG"):
             settings.debug = bool(service["debug"])
+        if service.get("token_refresh_interval") is not None and not os.environ.get(
+            "YOTO_TOKEN_REFRESH_INTERVAL"
+        ):
+            settings.token_refresh_interval = int(service["token_refresh_interval"])
 
         daily = raw.get("daily") or {}
         if daily.get("card_id") and not os.environ.get("YOTO_DAILY_CARD_ID"):
@@ -145,7 +163,26 @@ class Settings:
         if say_options.get("voice") and not os.environ.get("YOTO_TTS_VOICE"):
             settings.tts_voice = str(say_options["voice"])
 
+        # A Ming-3.0-tts default speech generator also narrates the
+        # capabilities, so one switch moves the whole service over.
+        # "auto" means exactly that, so it is not a forced choice and does
+        # not stop the default from being followed.
+        if os.environ.get("YOTO_TTS_BACKEND", "auto").strip().lower() in ("", "auto"):
+            default = str(speech.get("default") or "")
+            entry = (speech.get("options") or {}).get(default)
+            if isinstance(entry, dict) and str(entry.get("type") or "").lower() == "ming-tts":
+                settings.tts_backend = "ming-tts"
+
         return settings
+
+    @property
+    def ming_tts_options(self) -> dict[str, Any]:
+        """The ``ming-tts`` entry of the speech generator configuration."""
+        speech = ((self.raw_config or {}).get("generators") or {}).get("speech") or {}
+        for entry in (speech.get("options") or {}).values():
+            if isinstance(entry, dict) and str(entry.get("type") or "").lower() == "ming-tts":
+                return dict(entry)
+        return {}
 
     @property
     def state_file(self) -> Path:

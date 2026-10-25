@@ -8,6 +8,10 @@ service:
   host: 127.0.0.1
   port: 8787
   debug: false
+  # How often the service refreshes the access token in the background, in
+  # seconds. The token lasts eight hours; an hour keeps it fresh. Zero
+  # turns the refresher off.
+  token_refresh_interval: 3600
 
 daily:
   # Leave empty to have the service create and remember its own card.
@@ -32,7 +36,7 @@ generators:
         enabled: true
         endpoint: http://127.0.0.1:8001
         # Set ACESTEP_API_KEY in the environment if the server requires one.
-        api_key_env: ACESTEP_API_KEY
+        # api_key_env: ACESTEP_API_KEY
         model: acestep-v15-turbo
         timeout: 900
         poll_interval: 5
@@ -63,6 +67,47 @@ generators:
         type: say
         enabled: true
         voice: Karen
+
+      # Ming-3.0-tts, narrating in a cloned voice. Set this as the default
+      # above and the daily story and read-aloud capabilities use it too.
+      #
+      # The inference code comes from the GitHub checkout (code_path) and
+      # the weights from the Hub (repo_id); point model_path at a local
+      # copy and nothing is downloaded. Needs torch in the environment
+      # that runs the service:
+      #   pip install --index-url https://download.pytorch.org/whl/cpu \
+      #       torch==2.6.0 torchaudio==2.6.0
+      #   pip install transformers==4.46.3 accelerate==1.3.0 x_transformers==2.9.2 \
+      #       diffusers==0.33.0 onnxruntime soundfile==0.12.1 inflect einops \
+      #       loguru tqdm huggingface_hub
+      ming-tts:
+        type: ming-tts
+        enabled: true
+        code_path: ../Ming-3.0-tts
+        repo_id: inclusionAI/Ming-3.0-tts-0.5b
+        # Leave empty to pull the checkpoint into cache_dir on first use.
+        model_path: ../Ming-3.0-tts/models/Ming-3.0-tts-0.5b
+        cache_dir: ~/.cache/yotaiman/models
+        auto_download: true
+        device: auto
+        language_id: English
+        # The clip to clone, and the exact words spoken in it.
+        # The file has to exist here -- the generator reports it as
+        # unavailable until it does.
+        reference_wav: ~/yotaiman/my_voice.wav
+        reference_text: "the exact words spoken in the clip"
+        # Optional delivery instruction. Set one and the model narrates in
+        # that style, still in the cloned voice.
+        instruction: "Speak in a warm, intimate storytelling voice, unhurried."
+        use_spk_emb: true
+        # Needs pynini, which has no Windows wheel. Leave it off there.
+        text_normalization: false
+        # Named voices, picked with the "voice" parameter.
+        voices:
+          dad:
+            reference_wav: ~/yotaiman/dad.wav
+            reference_text: "the exact words spoken in dad.wav"
+            instruction: "Speak in a warm, intimate storytelling voice, unhurried."
 
       # A local TTS model server. The contract is:
       #   POST <url>  {"text": "...", "voice": "..."}  ->  audio bytes

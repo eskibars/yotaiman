@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .app import create_app
@@ -18,18 +19,58 @@ from .capabilities import base as caps
 from .config import Settings
 from .state import StateStore
 from yoto import Yoto
+from yoto._env import load_env_files
 from yoto.auth import YotoAuth
+
+
+def _is_serving_process(debug: bool) -> bool:
+    """Whether this process is the one that actually serves requests.
+
+    With ``debug`` on, Werkzeug runs the command twice: once as a watcher
+    that restarts the server on a code change, and once as the server
+    itself.  Only the server should keep a token warm.
+    """
+    if not debug:
+        return True
+    return os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+
+
+def _interval_label(seconds: int) -> str:
+    """``3600`` -> ``1 h``, ``90`` -> ``90 s``."""
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600} h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60} min"
+    return f"{seconds} s"
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = Settings.load()
     app = create_app(settings)
     print(f"yotaiman listening on http://{settings.host}:{settings.port}")
-    app.run(
-        host="0.0.0.0" if settings.allow_remote else settings.host,
-        port=settings.port,
-        debug=settings.debug,
-    )
+
+    # The token lasts eight hours; the refresher keeps a fresh one in hand
+    # so a long run never trips over an expired session.  It mints tokens
+    # over plain HTTP, so no browser is needed while the service runs.
+    refresher = app.extensions["token_refresher"]
+    refresher.set_report(lambda message: print(f"[token] {message}", flush=True))
+    started = False
+    if _is_serving_process(settings.debug) and refresher.start():
+        started = True
+        print(
+            "Refreshing the access token every "
+            f"{_interval_label(settings.token_refresh_interval)} in the background."
+        )
+
+    try:
+        app.run(
+            host="0.0.0.0" if settings.allow_remote else settings.host,
+            port=settings.port,
+            debug=settings.debug,
+        )
+    finally:
+        if started:
+            refresher.stop()
     return 0
 
 
@@ -71,6 +112,11 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The project's ``.env`` is read here rather than at import time, so that
+    # a library user -- or a test -- is not affected by it, while the command
+    # line behaves the same on every platform.
+    load_env_files()
+
     parser = argparse.ArgumentParser(prog="yotaiman", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

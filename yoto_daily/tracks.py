@@ -62,7 +62,8 @@ class TrackRequest:
         # Allow the common fields at the top level too, so a simple request
         # does not need the nested "params" object.
         for key in ("text", "prompt", "source", "url", "path", "voice", "duration",
-                    "bpm", "tags", "lyrics", "key_scale", "time_signature", "seed"):
+                    "bpm", "tags", "lyrics", "key_scale", "time_signature", "seed",
+                    "instruction"):
             if key in data and key not in params:
                 params[key] = data[key]
 
@@ -272,7 +273,7 @@ class TrackService:
         return path
 
     def _generate_music(self, card_id: str, request: TrackRequest) -> dict[str, Any]:
-        generator = self.registry.get_music(request.generator or None)
+        generator = self.registry.pick_music(request.generator or None)
         spec = MusicSpec.from_dict(request.params)
         if not spec.to_prompt() and not spec.lyrics:
             raise TrackError("a music track needs a prompt, tags or lyrics")
@@ -327,11 +328,12 @@ class TrackService:
         if not text:
             raise TrackError("a text-to-speech track needs a 'text'")
 
-        generator = self.registry.get_speech(request.generator or None)
+        generator = self.registry.pick_speech(request.generator or None)
         voice = str(request.params.get("voice") or "")
+        instruction = str(request.params.get("instruction") or "")
 
         out_path = self._work_dir() / "speech.mp3"
-        result = generator.synthesize(text, out_path, voice=voice)
+        result = generator.synthesize(text, out_path, voice=voice, instruction=instruction)
 
         title = request.title or (text.split("\n", 1)[0].strip()[:60] or "Read aloud")
         upload = self.yoto.media.upload_audio(result.path, title=title)
@@ -383,8 +385,9 @@ class TrackService:
         except BookError as exc:
             raise TrackError(str(exc)) from exc
 
-        generator = self.registry.get_speech(request.generator or None)
+        generator = self.registry.pick_speech(request.generator or None)
         voice = str(request.params.get("voice") or "")
+        instruction = str(request.params.get("instruction") or "")
 
         sections = book.chapters or [book.text]
         if limit:
@@ -395,7 +398,9 @@ class TrackService:
 
         for index, section in enumerate(sections):
             out_path = self._work_dir() / f"book-{index:03d}.mp3"
-            result = generator.synthesize(section, out_path, voice=voice)
+            result = generator.synthesize(
+                section, out_path, voice=voice, instruction=instruction
+            )
             title = request.title or f"{book.title} - Part {index + 1}"
 
             upload = self.yoto.media.upload_audio(result.path, title=title)

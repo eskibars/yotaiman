@@ -2,6 +2,23 @@
 {% block title %}Cards · Yoto Daily{% endblock %}
 
 {% block content %}
+{% if not session_ok or refresh_error %}
+  <div class="flash-stack">
+    <p class="flash flash-error" role="status">
+      {% if not session_ok %}
+        The Yoto session has lapsed, so the service cannot reach the account.
+      {% else %}
+        The background token refresh failed, so the token may lapse.
+      {% endif %}
+      {% if refresh and refresh.instructions %}
+        {{ refresh.instructions }}
+      {% else %}
+        Run "python -m yoto.auth bootstrap" in a Chrome that is signed in to Yoto.
+      {% endif %}
+    </p>
+  </div>
+{% endif %}
+
 <section class="section section-lead">
   <div class="lead">
     <div class="lead-figure">

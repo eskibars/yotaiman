@@ -11,50 +11,26 @@ Usage::
     python -m yoto.auth status               # show the current session
     python -m yoto.auth token                # print a fresh access token
 
-``bootstrap`` needs Chrome started with a remote debugging port, e.g.::
-
-    /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
-        --remote-debugging-port=9222
+``bootstrap`` needs Chrome exposing a DevTools endpoint.  Since Chrome 136 the
+``--remote-debugging-port`` switch is ignored for the default profile, so the
+route that works with an everyday profile is ``chrome://inspect/#remote-debugging``
+-> Enable.  :func:`yoto._cdp.chrome_launch_hint` spells out the alternatives.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from typing import Any
 
+from ._cdp import CdpError, chrome_launch_hint, get_cookies
+from ._env import load_env_files
 from .auth import YotoAuth
 
 
 def _cdp_cookies(port: int, domain_filter: str = "login.yotoplay.com") -> list[dict[str, Any]]:
     """Pull cookies from a Chrome instance exposing CDP on ``port``."""
-    import urllib.request
-
-    from ._ws import WebSocket
-
-    with urllib.request.urlopen(f"http://localhost:{port}/json/version", timeout=5) as resp:
-        version = json.loads(resp.read())
-
-    ws_url = version["webSocketDebuggerUrl"]
-    with WebSocket(ws_url) as ws:
-        ws.send_json({"id": 1, "method": "Storage.getCookies", "params": {}})
-        while True:
-            msg = ws.recv_json()
-            if msg.get("id") == 1:
-                cookies = msg.get("result", {}).get("cookies", [])
-                break
-
-    return [
-        {
-            "name": c["name"],
-            "value": c["value"],
-            "domain": c["domain"],
-            "path": c.get("path", "/"),
-        }
-        for c in cookies
-        if domain_filter in c.get("domain", "")
-    ]
+    return get_cookies(port, domain_filter)
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
@@ -62,15 +38,15 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     print(f"Looking for Chrome on CDP port {args.cdp_port} ...")
     try:
         cookies = _cdp_cookies(args.cdp_port)
-    except SystemExit:
-        raise
-    except Exception as exc:
+    except CdpError as exc:
         print(f"Could not reach Chrome via CDP: {exc}")
-        print(
-            "\nStart Chrome with remote debugging enabled:\n"
-            "  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome "
-            "--remote-debugging-port=9222"
-        )
+        print()
+        print(chrome_launch_hint(args.cdp_port))
+        return 1
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"Could not reach Chrome via CDP: {exc}")
+        print()
+        print(chrome_launch_hint(args.cdp_port))
         return 1
 
     if not cookies:
@@ -118,6 +94,11 @@ def cmd_token(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # The project's ``.env`` is read here rather than at import time, so that
+    # a library user -- or a test -- is not affected by it, while the command
+    # line behaves the same on every platform.
+    load_env_files()
+
     parser = argparse.ArgumentParser(prog="yoto.auth", description=__doc__)
     parser.add_argument("--state-dir", default=None, help="Where cookies/token live")
     sub = parser.add_subparsers(dest="command", required=True)

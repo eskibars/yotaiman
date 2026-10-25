@@ -24,6 +24,7 @@ from .capabilities import base as caps
 from .config import Settings
 from .generators import build_registry, default_registry
 from .state import StateStore
+from .token_refresher import TokenRefresher
 from .tracks import TrackService
 from .web import web
 
@@ -72,6 +73,12 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.extensions["yoto"] = yoto
     app.extensions["generators"] = registry
     app.extensions["tracks"] = TrackService(yoto, registry, settings)
+    # The refresher is built here but only started by `serve`, so an
+    # application that is imported by a test never keeps a thread running.
+    app.extensions["token_refresher"] = TokenRefresher(
+        yoto.auth,
+        interval=settings.token_refresh_interval,
+    )
 
     # Capabilities share this process's Yoto client and settings.
     caps.set_context(

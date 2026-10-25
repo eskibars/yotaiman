@@ -23,16 +23,26 @@ Configuration shape::
             type: say
             enabled: true
             voice: Karen
+          ming-tts:
+            type: ming-tts
+            enabled: false
+            code_path: ../Ming-3.0-tts
+            reference_wav: ~/yotaiman/my_voice.wav
+            reference_text: "the exact words spoken in the clip"
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, TypeVar
 
 from .base import Generator, MusicGenerator, MusicSpec, SpeechGenerator
+from .ming_tts import MingTTSSpeechGenerator, build_ming_tts_generator
 from .music import AceStepMusicGenerator, SynthMusicGenerator
 from .speech import HTTPSpeechGenerator, SaySpeechGenerator
+
+#: Either kind of generator, for the shared lookup helper.
+_G = TypeVar("_G", bound=Generator)
 
 
 class GeneratorError(RuntimeError):
@@ -65,29 +75,88 @@ class GeneratorRegistry:
         return list(self._speech)
 
     def get_music(self, name: str | None = None) -> MusicGenerator:
-        if not self._music:
-            raise GeneratorError("no music generators are configured")
-        if not name:
-            name = self.default_music_name or self._music[0].name
-        for gen in self._music:
-            if gen.name == name:
-                return gen
-        raise GeneratorError(
-            f"unknown music generator {name!r}; "
-            f"available: {', '.join(g.name for g in self._music)}"
-        )
+        """Look a music generator up.
+
+        Without a name this is the configured default, whatever its
+        availability -- callers use this to inspect a generator.  Use
+        :meth:`pick_music` when the generator is about to render something.
+        """
+        return self._pick(self._music, name, self.default_music_name, "music")
 
     def get_speech(self, name: str | None = None) -> SpeechGenerator:
-        if not self._speech:
-            raise GeneratorError("no speech generators are configured")
-        if not name:
-            name = self.default_speech_name or self._speech[0].name
-        for gen in self._speech:
-            if gen.name == name:
+        """Look a speech generator up.
+
+        Without a name this is the configured default, whatever its
+        availability -- callers use this to inspect a generator.  Use
+        :meth:`pick_speech` when the generator is about to narrate something.
+        """
+        return self._pick(self._speech, name, self.default_speech_name, "speech")
+
+    def pick_music(self, name: str | None = None) -> MusicGenerator:
+        """The music generator to actually render with.
+
+        An explicit name is honoured exactly.  Without one the configured
+        default is used when it can run, and otherwise the first generator
+        that can -- a config written on macOS points at ACE-Step, which needs
+        a local server that is not always up.
+        """
+        return self._pick(self._music, name, self.default_music_name, "music", usable=True)
+
+    def pick_speech(self, name: str | None = None) -> SpeechGenerator:
+        """The speech generator to actually narrate with.
+
+        An explicit name is honoured exactly.  Without one the configured
+        default is used when it can run, and otherwise the first generator
+        that can -- a config written on macOS points at ``say``, which does
+        not exist on Windows or Linux.
+        """
+        return self._pick(self._speech, name, self.default_speech_name, "speech", usable=True)
+
+    @staticmethod
+    def _pick(
+        generators: list[_G],
+        name: str | None,
+        default: str,
+        kind: str,
+        *,
+        usable: bool = False,
+    ) -> _G:
+        """Choose a generator.
+
+        With ``usable`` the choice has to be one that can run right now;
+        without it the configured default is returned even when it cannot,
+        so a caller can look at it and ask why.
+        """
+        if not generators:
+            raise GeneratorError(f"no {kind} generators are configured")
+
+        if name:
+            for gen in generators:
+                if gen.name == name:
+                    return gen
+            raise GeneratorError(
+                f"unknown {kind} generator {name!r}; "
+                f"available: {', '.join(g.name for g in generators)}"
+            )
+
+        wanted = default or generators[0].name
+        chosen = next((g for g in generators if g.name == wanted), None)
+        if chosen is None:
+            chosen = generators[0]
+
+        if not usable:
+            return chosen
+        if chosen.available():
+            return chosen
+
+        for gen in generators:
+            if gen.available():
                 return gen
+
+        details = "; ".join(f"{g.name}: {g.detail() or 'not available'}" for g in generators)
         raise GeneratorError(
-            f"unknown speech generator {name!r}; "
-            f"available: {', '.join(g.name for g in self._speech)}"
+            f"no usable {kind} generator ({details}). Enable one of the others "
+            f"in config.yaml, or set generators.{kind}.default to one that works."
         )
 
     # ------------------------------------------------------------------
@@ -175,6 +244,8 @@ def _build_speech(name: str, entry: dict[str, Any]) -> SpeechGenerator | None:
             response_format=str(entry.get("response_format") or ""),
             ffmpeg_command=str(entry.get("ffmpeg_command") or "ffmpeg"),
         )
+    if kind == "ming-tts":
+        return build_ming_tts_generator(name, entry)
     return None
 
 
@@ -216,8 +287,10 @@ def build_registry(config: dict[str, Any] | None) -> GeneratorRegistry:
 def default_registry() -> GeneratorRegistry:
     """A registry that works with no configuration at all.
 
-    macOS ``say`` for speech and the procedural synth for music, so the API is
-    never empty even before ``config.yaml`` is written.
+    The procedural synth for music and macOS ``say`` for speech, so the API
+    is never empty even before ``config.yaml`` is written.  ``say`` only runs
+    on macOS; elsewhere it stays listed but reports itself as unavailable,
+    and the lookup falls back to any generator that does work.
     """
     return GeneratorRegistry(
         music=[SynthMusicGenerator("synth")],

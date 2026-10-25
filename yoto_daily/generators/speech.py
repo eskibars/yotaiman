@@ -11,6 +11,7 @@ receive audio bytes back -- so one implementation serves both.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +19,24 @@ from pathlib import Path
 from typing import Any
 
 from .base import AudioResult, SpeechGenerator
+
+
+#: A voice name that is safe to drop into a URL path.
+_SAFE_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._~-]+$")
+
+
+def _url_segment(value: str) -> str:
+    """A value that is safe to put in a URL path.
+
+    The voice reaches the generator from a request, and it becomes part of
+    the path, so it is checked before it gets there: a name carrying a
+    slash or a ``..`` could otherwise point the request somewhere else on
+    the same host, with the API key still attached.
+    """
+    candidate = str(value or "").strip()
+    if not candidate or ".." in candidate or not _SAFE_PATH_SEGMENT.match(candidate):
+        raise RuntimeError(f"{candidate!r} is not a usable voice name")
+    return candidate
 
 
 def _probe_duration(path: Path, ffmpeg_command: str = "ffmpeg") -> float:
@@ -86,13 +105,20 @@ class SaySpeechGenerator(SpeechGenerator):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp:
             aiff = Path(tmp) / "speech.aiff"
+            # The text goes in a file rather than on the command line.  A
+            # caller who controls the text could otherwise make `say` treat
+            # it as one of its own options -- `--input-file=/etc/passwd`
+            # would have it read and speak a file of the caller's choosing.
+            script = Path(tmp) / "speech.txt"
+            script.write_text(text, encoding="utf-8")
+
             cmd = [self.say_command, "-o", str(aiff)]
             chosen = voice or self.voice
             if chosen:
                 cmd += ["-v", chosen]
             if self.rate:
                 cmd += ["-r", str(self.rate)]
-            cmd.append(text)
+            cmd += ["-f", str(script)]
 
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if proc.returncode != 0:
@@ -174,7 +200,8 @@ class HTTPSpeechGenerator(SpeechGenerator):
             return False
 
     def detail(self) -> str:
-        return f"HTTP endpoint at {self.url}"
+        # The query string is left off: it can carry a key.
+        return f"HTTP endpoint at {self.url.split('?')[0]}"
 
     def synthesize(
         self,
@@ -203,7 +230,10 @@ class HTTPSpeechGenerator(SpeechGenerator):
             # speak about delivery use it.
             body["instruction"] = instruction
         if "{voice}" in url:
-            url = url.replace("{voice}", chosen)
+            # The voice becomes part of the path, so it has to be a plain
+            # path segment: anything that could move the path -- a slash,
+            # a "..", a query -- is refused rather than escaped.
+            url = url.replace("{voice}", _url_segment(chosen))
         if "{text}" in url:
             url = url.replace("{text}", requests.utils.quote(text))
             body = {}

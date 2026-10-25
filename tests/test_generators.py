@@ -354,7 +354,11 @@ def test_ming_tts_reports_the_checkpoint_state(tmp_path):
     generator = build_ming_tts_generator(
         "voice", _ming_entry(tmp_path, auto_download=True)
     )
-    assert "checkpoint at" in generator.detail()
+    # The note says the checkpoint is in place without naming the path it
+    # sits at: the generator listing is shown to whoever asks the service.
+    detail = generator.detail()
+    assert "checkpoint is in place" in detail
+    assert str(model) not in detail
 
 
 def test_ming_tts_pulls_the_checkpoint_when_it_is_missing(tmp_path, monkeypatch):

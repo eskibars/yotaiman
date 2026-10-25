@@ -12,6 +12,12 @@ service:
   # seconds. The token lasts eight hours; an hour keeps it fresh. Zero
   # turns the refresher off.
   token_refresh_interval: 3600
+  # Where a caller-supplied file path may point. A path that resolves
+  # outside every one of these is refused, so the service cannot be used to
+  # read a file it should not reach. Use the platform separator to list
+  # more than one: "~/yotaiman:~/Audiobooks".
+  content_dirs:
+    - ~/yotaiman
 
 daily:
   # Leave empty to have the service create and remember its own card.

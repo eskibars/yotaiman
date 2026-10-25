@@ -24,6 +24,7 @@
 
 <section class="section">
   <form method="post" action="{{ url_for('web.add_track_submit', card_id=card_id) }}" class="composer">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <fieldset class="chooser">
       <legend class="field-label">What kind of track</legend>

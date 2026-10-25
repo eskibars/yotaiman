@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Yoto Daily{% endblock %}
+
+{% block content %}
+<section class="section">
+  <h2 class="section-title">Sign in</h2>
+
+  <p class="empty">
+    This service drives a personal Yoto account, so it asks for a token
+    before it shows anything.
+  </p>
+
+  <form method="post" action="{{ url_for('web.unlock') }}" class="lead-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <label class="field field-inline">
+      <span class="field-label">Token</span>
+      <input class="input" type="password" name="token" autofocus
+             placeholder="paste the API token" autocomplete="off"
+             spellcheck="false">
+    </label>
+
+    <button class="button button-primary" type="submit">Unlock</button>
+  </form>
+
+  <p class="empty">
+    The token lives in the state directory, in a file called
+    <code>api-token</code>. Run <code>yotaiman token</code> to print it.
+  </p>
+</section>
+{% endblock %}

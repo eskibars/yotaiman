@@ -49,6 +49,26 @@ SCOPES = (
     "family:library:card-audio user:content:manage"
 )
 
+
+def write_private_file(path: Path, text: str) -> None:
+    """Write a file that only its owner can read, from the first byte.
+
+    Creating the file with the right mode matters: a file that is written
+    first and restricted afterwards is readable by everyone else for the
+    moment in between, and these files carry a live session.
+
+    On Windows the mode does not apply -- the platform only honours the
+    read-only bit -- but the state directory lives under the user's own
+    profile, which is already restricted to that user.
+    """
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    try:
+        os.chmod(str(path), 0o600)
+    except OSError:  # pragma: no cover - platform dependent
+        pass
+
 #: Cookies that must be replayed for the silent exchange to succeed.  The
 #: ``auth0`` cookie alone is not enough -- ``auth0_compat`` carries the tenant
 #: hint that lets Auth0 match the existing SSO session.
@@ -136,13 +156,14 @@ class YotoAuth:
         return data if isinstance(data, list) else []
 
     def save_cookies(self, cookies: list[dict[str, Any]]) -> None:
-        """Persist a cookie jar captured from a browser."""
+        """Persist a cookie jar captured from a browser.
+
+        The jar carries a live session, so the file is created with owner-
+        only permissions rather than being written first and restricted
+        afterwards: there is no window in which it is readable by others.
+        """
         self.cookies_file.parent.mkdir(parents=True, exist_ok=True)
-        self.cookies_file.write_text(json.dumps(cookies, indent=2))
-        try:
-            self.cookies_file.chmod(0o600)
-        except OSError:  # pragma: no cover - platform dependent
-            pass
+        write_private_file(self.cookies_file, json.dumps(cookies, indent=2))
 
     def _session_with_cookies(self) -> requests.Session:
         sess = requests.Session()
@@ -204,7 +225,10 @@ class YotoAuth:
         # writes from its own thread while request threads read, and a reader
         # must never catch half a token.
         tmp = self.cache_file.with_name(f"{self.cache_file.name}.{os.getpid()}.tmp")
-        tmp.write_text(
+        # Owner-only from the first byte: the temporary file is readable
+        # between the write and the move otherwise.
+        write_private_file(
+            tmp,
             json.dumps(
                 {
                     "access_token": token.access_token,
@@ -213,13 +237,9 @@ class YotoAuth:
                     "id_token": token.id_token,
                 },
                 indent=2,
-            )
+            ),
         )
         tmp.replace(self.cache_file)
-        try:
-            self.cache_file.chmod(0o600)
-        except OSError:  # pragma: no cover
-            pass
         self._cached = token
         return token
 

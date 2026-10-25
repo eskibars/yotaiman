@@ -42,6 +42,19 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _default_content_dirs() -> list[Path]:
+    """Where a caller-supplied file path may point by default.
+
+    ``~/yotaiman`` is where the project already keeps its media -- the
+    sample configuration points ``reference_wav`` at ``~/yotaiman/*.wav`` --
+    so it is the one directory every installation already has.
+    """
+    try:
+        return [Path.home() / "yotaiman"]
+    except RuntimeError:  # pragma: no cover - no home directory
+        return []
+
+
 def load_config_file(path: Path | str) -> dict[str, Any]:
     """Read a YAML config file, returning ``{}`` if it is absent or broken."""
     path = Path(path)
@@ -131,6 +144,37 @@ class Settings:
         default_factory=lambda: _env_int("YOTO_TOKEN_REFRESH_INTERVAL", 3600)
     )
 
+    #: Whether a caller has to present the API token.  On by default: the
+    #: service drives a personal account, so an unauthenticated caller could
+    #: read the shelf and rewrite the daily card.  Turning this off is only
+    #: safe on a network nobody else can reach.
+    auth_enabled: bool = field(
+        default_factory=lambda: _env_bool("YOTO_AUTH", True)
+    )
+
+    #: The token itself.  Empty means "use the one in the state directory",
+    #: which is generated on first run.
+    api_token: str = field(
+        default_factory=lambda: os.environ.get("YOTO_API_TOKEN", "").strip()
+    )
+
+    #: Where a caller-supplied file path is allowed to point.  A path that
+    #: resolves outside every one of these is refused.
+    content_dirs: list[Path] = field(default_factory=_default_content_dirs)
+
+    #: The longest text a caller may send to be narrated or turned into a
+    #: story.  Long enough for a chapter, short enough that the speech
+    #: synthesiser cannot be turned into a way of spending money.
+    max_text_length: int = field(
+        default_factory=lambda: _env_int("YOTO_MAX_TEXT", 5000)
+    )
+
+    #: How many times a minute one caller may ask for a generated track or a
+    #: story.  Zero removes the limit.
+    rate_limit: int = field(
+        default_factory=lambda: _env_int("YOTO_RATE_LIMIT", 30)
+    )
+
     @classmethod
     def load(cls, path: Path | str | None = None) -> "Settings":
         """Build settings from a config file plus the environment."""
@@ -149,6 +193,22 @@ class Settings:
             "YOTO_TOKEN_REFRESH_INTERVAL"
         ):
             settings.token_refresh_interval = int(service["token_refresh_interval"])
+
+        # Where a caller-supplied path may point.  The environment wins over
+        # the file so it can be changed without editing the config.
+        raw_dirs = os.environ.get("YOTO_CONTENT_DIRS", "")
+        if not raw_dirs:
+            configured = service.get("content_dirs")
+            if isinstance(configured, str):
+                raw_dirs = configured
+            elif isinstance(configured, (list, tuple)):
+                raw_dirs = os.pathsep.join(str(part) for part in configured)
+        if raw_dirs.strip():
+            settings.content_dirs = [
+                Path(part.strip()).expanduser()
+                for part in raw_dirs.split(os.pathsep)
+                if part.strip()
+            ]
 
         daily = raw.get("daily") or {}
         if daily.get("card_id") and not os.environ.get("YOTO_DAILY_CARD_ID"):
@@ -199,3 +259,11 @@ class Settings:
     def ensure_dirs(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        # The state directory holds the cookie jar, the access token and the
+        # API token, so nobody else on the machine needs to see it.  On
+        # Windows the mode does not apply, but it does no harm either.
+        for path in (self.state_dir, self.work_dir):
+            try:
+                path.chmod(0o700)
+            except OSError:  # pragma: no cover - platform dependent
+                pass

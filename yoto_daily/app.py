@@ -17,12 +17,14 @@ import secrets
 from flask import Flask
 
 from yoto import Yoto
-from yoto.auth import YotoAuth
+from yoto.auth import YotoAuth, write_private_file
 
 from .api import api
 from .capabilities import base as caps
 from .config import Settings
+from .gate import install_request_guard
 from .generators import build_registry, default_registry
+from .security import RateLimiter, load_api_token
 from .state import StateStore
 from .token_refresher import TokenRefresher
 from .tracks import TrackService
@@ -48,8 +50,8 @@ def _secret_key(settings: Settings) -> str:
     key = secrets.token_hex(32)
     try:
         settings.state_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(key)
-        path.chmod(0o600)
+        # Owner-only from the first byte: the key signs the session cookie.
+        write_private_file(path, key)
     except OSError:  # pragma: no cover - platform dependent
         pass
     return key
@@ -64,6 +66,22 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.secret_key = os.environ.get("YOTO_SECRET_KEY") or _secret_key(settings)
     app.config["YOTO_SETTINGS"] = settings
     app.config["YOTO_STATE"] = StateStore(settings.state_file)
+
+    # The session cookie carries the sign-in, so it is kept to itself: no
+    # JavaScript, and no cross-site use.
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+    )
+
+    # The token the service expects.  It is generated on first run and kept
+    # beside the rest of the service state, readable only by its owner.
+    token = settings.api_token or load_api_token(settings.state_dir)
+    app.config["YOTO_TOKEN"] = token
+
+    # One caller may only ask for so much generated work per minute; the
+    # generators call out to paid services.
+    app.config["YOTO_RATE_LIMITER"] = RateLimiter(settings.rate_limit)
 
     yoto = Yoto(auth=YotoAuth(state_dir=settings.state_dir))
     registry = build_registry(settings.raw_config)
@@ -89,4 +107,8 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     app.register_blueprint(api)
     app.register_blueprint(web)
+
+    # The perimeter goes on last, so it sees every request.
+    install_request_guard(app)
+
     return app

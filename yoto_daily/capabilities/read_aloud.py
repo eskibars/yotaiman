@@ -90,6 +90,17 @@ class ReadAloudCapability(Capability):
                 ok=False, message="no text supplied", data={}
             )
 
+        limit = int(getattr(self.settings, "max_text_length", 0) or 0)
+        if limit and len(text) > limit:
+            return CapabilityResult(
+                ok=False,
+                message=(
+                    f"the text is {len(text)} characters long; "
+                    f"the limit is {limit}"
+                ),
+                data={},
+            )
+
         title = (params.get("title") or "Read aloud").strip()
         voice = (params.get("voice") or "").strip() or self.settings.tts_voice
         instruction = (params.get("instruction") or "").strip()

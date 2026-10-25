@@ -54,6 +54,7 @@
       {% endif %}
 
       <form method="post" action="{{ url_for('web.publish_daily') }}" class="lead-actions">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="button button-primary" type="submit">Publish today's story</button>
         <label class="field field-inline">
           <span class="field-label">Topic</span>

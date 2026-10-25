@@ -208,7 +208,11 @@ def client(tmp_path, monkeypatch):
     settings = Settings(state_dir=tmp_path / "state")
     app = create_app(settings)
     app.config["TESTING"] = True
-    return app.test_client()
+    test_client = app.test_client()
+    test_client.environ_base["HTTP_AUTHORIZATION"] = (
+        f"Bearer {app.config['YOTO_TOKEN']}"
+    )
+    return test_client
 
 
 def test_index_lists_endpoints(client):

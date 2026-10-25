@@ -11,12 +11,15 @@ implement ``run``, and decorate it with :func:`register`.
 
 from __future__ import annotations
 
+import logging
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from yoto.errors import YotoError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -133,8 +136,14 @@ def names() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def run_safely(name: str, **params: Any) -> CapabilityResult:
-    """Run a capability, turning any failure into a structured result."""
+def run_safely(name: str, *, include_traceback: bool = False, **params: Any) -> CapabilityResult:
+    """Run a capability, turning any failure into a structured result.
+
+    The detail of an unexpected failure stays on the server: the caller is
+    told what happened in general terms, and the service log has the
+    traceback.  The command line asks for the traceback, because whoever is
+    running it is the operator.
+    """
     try:
         cap = get(name)
     except KeyError:
@@ -147,14 +156,21 @@ def run_safely(name: str, **params: Any) -> CapabilityResult:
     try:
         return cap.run(**params)
     except YotoError as exc:
+        data: dict[str, Any] = {}
+        if include_traceback:
+            data["traceback"] = traceback.format_exc(limit=3)
         return CapabilityResult(
             ok=False,
             message=f"{type(exc).__name__}: {exc}",
-            data={"traceback": traceback.format_exc(limit=3)},
+            data=data,
         )
     except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("capability %s failed", name)
+        data = {}
+        if include_traceback:
+            data["traceback"] = traceback.format_exc(limit=3)
         return CapabilityResult(
             ok=False,
             message=f"{type(exc).__name__}: {exc}",
-            data={"traceback": traceback.format_exc(limit=3)},
+            data=data,
         )

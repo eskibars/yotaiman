@@ -110,6 +110,20 @@ class DailyStoryCapability(Capability):
         instruction = (params.get("instruction") or "").strip()
         dry_run = bool(params.get("dry_run"))
 
+        limit = int(getattr(self.settings, "max_text_length", 0) or 0)
+        if limit:
+            for name, value in (("topic", topic), ("child_name", child_name),
+                                ("instruction", instruction)):
+                if value and len(value) > limit:
+                    return CapabilityResult(
+                        ok=False,
+                        message=(
+                            f"the {name} is {len(value)} characters long; "
+                            f"the limit is {limit}"
+                        ),
+                        data={},
+                    )
+
         story = self.text_source.generate(topic, child_name=child_name)
         if params.get("title"):
             story.title = str(params["title"])

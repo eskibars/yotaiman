@@ -23,6 +23,9 @@ from typing import Any
 #: Rough target length for one spoken chapter, in words.
 DEFAULT_CHAPTER_WORDS = 1800
 
+#: How large a fetched book may be, in bytes.
+MAX_BOOK_BYTES = 64 * 1024 * 1024
+
 
 @dataclass
 class Book:
@@ -310,30 +313,51 @@ def read_html(path: Path) -> Book:
     )
 
 
-def read_url(url: str, *, timeout: float = 60.0) -> Book:
-    """Fetch a URL and read it as HTML, PDF or plain text."""
-    import requests
+def read_url(
+    url: str,
+    *,
+    timeout: float = 60.0,
+    max_bytes: int = MAX_BOOK_BYTES,
+) -> Book:
+    """Fetch a URL and read it as HTML, PDF or plain text.
+
+    The URL is fetched through :func:`safe_fetch`, so it cannot be used to
+    reach the machine the service runs on or anything else on the local
+    network.
+    """
+    from ..security import SecurityError, UnsafeURLError, read_capped, safe_fetch
 
     try:
-        resp = requests.get(
+        resp = safe_fetch(
             url,
             timeout=timeout,
             headers={"User-Agent": "yotaiman/0.1 (book reader)"},
         )
+    except UnsafeURLError as exc:
+        raise BookError(f"refusing to fetch that URL: {exc}") from exc
     except Exception as exc:
         raise BookError(f"could not fetch {url}: {exc}") from exc
 
     if resp.status_code >= 400:
+        resp.close()
         raise BookError(f"fetching {url} returned HTTP {resp.status_code}")
 
     content_type = resp.headers.get("Content-Type", "").lower()
+    encoding = resp.encoding or "utf-8"
     title = url.rsplit("/", 1)[-1] or url
+
+    try:
+        payload = read_capped(resp, max_bytes)
+    except SecurityError as exc:
+        raise BookError(str(exc)) from exc
+    finally:
+        resp.close()
 
     if "pdf" in content_type or url.lower().endswith(".pdf"):
         import tempfile
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
-            handle.write(resp.content)
+            handle.write(payload)
             tmp_path = Path(handle.name)
         try:
             book = read_pdf(tmp_path)
@@ -343,13 +367,15 @@ def read_url(url: str, *, timeout: float = 60.0) -> Book:
         book.fmt = "pdf"
         return book
 
-    if "html" in content_type or "<html" in resp.text[:2000].lower():
-        text = normalise(_html_to_text(resp.text))
-        match = re.search(r"(?is)<title[^>]*>(.*?)</title>", resp.text)
+    body = payload.decode(encoding, errors="replace")
+
+    if "html" in content_type or "<html" in body[:2000].lower():
+        text = normalise(_html_to_text(body))
+        match = re.search(r"(?is)<title[^>]*>(.*?)</title>", body)
         if match:
             title = html.unescape(match.group(1)).strip()
     else:
-        text = normalise(resp.text)
+        text = normalise(body)
 
     if not text:
         raise BookError(f"no readable text at {url}")
@@ -366,18 +392,36 @@ def read_url(url: str, *, timeout: float = 60.0) -> Book:
 # ----------------------------------------------------------------------
 # dispatch
 # ----------------------------------------------------------------------
-def read_book(source: str | Path, *, max_words: int = DEFAULT_CHAPTER_WORDS) -> Book:
+def read_book(
+    source: str | Path,
+    *,
+    max_words: int = DEFAULT_CHAPTER_WORDS,
+    content_dirs: list[Path] | None = None,
+) -> Book:
     """Read a book from a path or a URL.
 
     The format is chosen from the file extension, falling back to sniffing
     the file's magic bytes for formats that lie about their suffix.
+
+    ``content_dirs`` confines a local path to those directories; without it
+    any path may be read, which is what an operator running this from a
+    terminal expects.
     """
     raw = str(source)
 
     if raw.startswith(("http://", "https://")):
         return read_url(raw)
 
-    path = Path(raw).expanduser()
+    if content_dirs:
+        from ..security import UnsafePathError, resolve_within
+
+        try:
+            path = resolve_within(content_dirs, raw)
+        except UnsafePathError as exc:
+            raise BookError(str(exc)) from exc
+    else:
+        path = Path(raw).expanduser()
+
     if not path.exists():
         raise BookError(f"no such file: {path}")
 

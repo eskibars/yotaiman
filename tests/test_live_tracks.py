@@ -33,7 +33,12 @@ def client():
 
     app = create_app(Settings.load())
     app.config["TESTING"] = True
-    return app.test_client()
+    test_client = app.test_client()
+    # The service asks for a token before it does anything.
+    test_client.environ_base["HTTP_AUTHORIZATION"] = (
+        f"Bearer {app.config['YOTO_TOKEN']}"
+    )
+    return test_client
 
 
 @pytest.fixture(scope="module")

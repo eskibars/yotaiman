@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,12 +90,25 @@ class MacSayBackend(TTSBackend):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         aiff = out_path.with_suffix(".aiff")
 
+        # The text goes in a file rather than on the command line, so that a
+        # caller who controls it cannot make `say` treat it as one of its
+        # own options.  The file has a name of its own, so two requests
+        # narrating at once do not tread on each other.
+        with tempfile.NamedTemporaryFile(
+            suffix=".say.txt", delete=False, dir=str(out_path.parent)
+        ) as handle:
+            handle.write(text.encode("utf-8"))
+        script = Path(handle.name)
+
         cmd = [self.say_command, "-o", str(aiff)]
         if voice:
             cmd += ["-v", voice]
-        cmd.append(text)
+        cmd += ["-f", str(script)]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        finally:
+            script.unlink(missing_ok=True)
         if proc.returncode != 0:
             raise RuntimeError(f"say failed: {(proc.stderr or proc.stdout)[:300]}")
         if not aiff.exists():

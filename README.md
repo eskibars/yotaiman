@@ -45,6 +45,8 @@ python -m yoto_daily daily --topic dolphins --child-name "Alex"
 # 3. Or run the service.
 #    The HTML desk is at http://127.0.0.1:8787/
 #    The JSON API is at http://127.0.0.1:8787/api/
+#    The desk asks for a token the first time; print it with:
+python -m yoto_daily token
 python -m yoto_daily serve
 ```
 
@@ -55,6 +57,32 @@ mints its own access tokens without a browser. See
 
 Installing the package also puts a `yotaiman` command on your path.
 `python -m yoto_daily ...` does the same thing if you would rather not install.
+
+---
+
+## Asking the service for a token
+
+The service drives a personal account, so it does not serve anybody who has
+not shown a token. One is generated on the first run and kept in
+`~/.config/yotaiman/api-token`, readable only by you.
+
+```bash
+# Print it.
+python -m yoto_daily token
+
+# Use it against the JSON API.
+curl -H "Authorization: Bearer $(python -m yoto_daily token)" \
+     http://127.0.0.1:8787/api/
+
+# Or put it in the address bar, which is the only option on a phone.
+open "http://127.0.0.1:8787/?token=$(python -m yoto_daily token)"
+```
+
+The desk moves a token out of the address bar into a session cookie as soon
+as it has it, so it does not linger in the browser history.
+
+Set `YOTO_API_TOKEN` to choose the token yourself, or `YOTO_AUTH=off` to turn
+the check off — only do that on a network nobody else can reach.
 
 ---
 
@@ -125,17 +153,22 @@ POST   /api/daily               publish today's story
 ```
 
 ```bash
-curl -s localhost:8787/api/health | jq
-curl -s localhost:8787/api/cards  | jq '.cards[] | {card_id, title, duration}'
-curl -s localhost:8787/api/generators/music | jq
+TOKEN=$(python -m yoto_daily token)
+
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8787/api/health | jq
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8787/api/cards  | jq '.cards[] | {card_id, title, duration}'
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8787/api/generators/music | jq
 curl -s -X POST localhost:8787/api/daily \
+     -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' \
      -d '{"topic":"dolphins","child_name":"Alex"}' | jq
 ```
 
-The service binds to `127.0.0.1` and has no authentication of its own — it
-drives a personal account. `YOTO_ALLOW_REMOTE=true` widens the bind, so only do
-that on a trusted network.
+Every endpoint asks for the token; see
+[The perimeter](#the-perimeter). The service binds to `127.0.0.1` by
+default. `YOTO_ALLOW_REMOTE=true` widens the bind, so only do that on a
+trusted network — and put the address your phone will use in
+`YOTO_ALLOWED_HOSTS` when you do.
 
 ### Cards
 
@@ -182,9 +215,16 @@ switching shuffle on for an empty card keeps the switch on once tracks arrive.
 **File** — an audio file on disk, or one fetched from a URL.
 
 ```json
-{"type": "file", "path": "/path/to/lullaby.mp3"}
+{"type": "file", "path": "lullaby.mp3"}
 {"type": "file", "url": "https://example.com/lullaby.mp3"}
 ```
+
+A `path` has to resolve inside one of the content directories —
+`~/yotaiman` by default, or whatever `YOTO_CONTENT_DIRS` says. It may be
+absolute or relative to one of them; anything that lands outside is
+refused, so the service cannot be used to read a file it should not reach.
+A `url` is only fetched if it is `http` or `https` and it does not point
+back at this machine or the local network.
 
 **Generate** — the audio is produced first, then uploaded like a file. The
 `kind` selects what produces it.
@@ -230,6 +270,8 @@ yoto_daily/              the service
   api.py                 the JSON API blueprint (/api)
   web.py                 the HTML control desk blueprint (/)
   config.py              settings: config.yaml plus the environment
+  gate.py                the perimeter: token, Host, Origin, CSRF
+  security.py            the guards: safe_fetch, path confinement, token
   state.py               small JSON state store
   token_refresher.py     keeps the access token fresh in the background
   tracks.py              the track service (stream / file / generate)
@@ -498,6 +540,7 @@ voice reads a story differently from another:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/api/cards/<card_id>/tracks \
+  -H "Authorization: Bearer $(python -m yoto_daily token)" \
   -H 'Content-Type: application/json' \
   -d '{
         "type": "generate",
@@ -566,6 +609,13 @@ the command line: importing the library leaves the environment alone.
 | `YOTO_STATE_DIR` | `~/.config/yotaiman` | cookies, token, state, audio |
 | `YOTO_HOST` / `YOTO_PORT` | `127.0.0.1` / `8787` | where the API listens |
 | `YOTO_ALLOW_REMOTE` | `false` | bind to all interfaces |
+| `YOTO_API_TOKEN` | *(generated)* | the token the service expects; empty means use the one in the state directory |
+| `YOTO_AUTH` | `on` | `off` drops the token check — only safe on a network nobody else can reach |
+| `YOTO_ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host names the service answers to, comma separated |
+| `YOTO_CONTENT_DIRS` | `~/yotaiman` | where a caller-supplied file path may point, `:` separated |
+| `YOTO_MAX_TEXT` | `5000` | the longest text that may be narrated |
+| `YOTO_RATE_LIMIT` | `30` | how many generated tracks one caller may ask for per minute; `0` removes the limit |
+| `YOTO_DEBUG` | `false` | the Flask debugger; refused on anything but the loopback interface |
 | `YOTO_DAILY_CARD_ID` | *(empty)* | pin the daily card; empty means create one |
 | `YOTO_DAILY_MODE` | `replace` | `replace` (one story/day) or `history` (keep N days) |
 | `YOTO_HISTORY_DAYS` | `7` | how many days `history` keeps |
@@ -579,6 +629,50 @@ renamed. If that directory exists and the new one does not, it is still used,
 so upgrading does not force a fresh login. The path is the same on every
 platform — on Windows `~/.config/yotaiman` means
 `C:\Users\<you>\.config\yotaiman` — and `YOTO_STATE_DIR` overrides it.
+
+---
+
+## The perimeter
+
+The service can read the shelf, rewrite the daily card and spend money on
+speech and text generation, so it does not serve anybody who has not shown a
+token. Four things stand between a request and the account.
+
+**A token.** Generated on the first run and kept in
+`~/.config/yotaiman/api-token`, readable only by you. It is sent as
+`Authorization: Bearer <token>`, as `X-Yoto-Token: <token>`, or as
+`?token=<token>` in the address bar — the last one is there for a phone,
+which cannot set a header.
+
+**A Host allowlist.** A name that is rebound to this machine arrives
+carrying the attacker's own `Host` header, so the service only answers to
+`localhost`, `127.0.0.1` and whatever `YOTO_ALLOWED_HOSTS` says. If you open
+the service to the network with `YOTO_ALLOW_REMOTE=true`, put the address the
+phone will use in `YOTO_ALLOWED_HOSTS` as well:
+
+```bash
+YOTO_ALLOW_REMOTE=true YOTO_ALLOWED_HOSTS=192.168.1.20 python -m yoto_daily serve
+```
+
+**An Origin check.** A browser sends `Origin` on every POST it makes, so a
+request that carries one from somewhere else is refused. A request that
+presents the token in a header skips this check: a browser cannot set a
+header on another site's behalf.
+
+**A CSRF token** on the forms, for the requests that ride on the session
+cookie.
+
+On top of that:
+
+- a caller-supplied URL is only fetched if it is `http` or `https` and every
+  address it resolves to is publicly routable — the loopback interface, the
+  local network and the cloud metadata address are all refused, and each
+  redirect is checked again;
+- a caller-supplied path has to resolve inside `YOTO_CONTENT_DIRS`;
+- the narration text is written to a file rather than passed on the command
+  line, so it cannot become one of `say`'s own options;
+- the service refuses to start with the debugger on and a network bind; and
+- a caller may only ask for so much generated work per minute.
 
 ### Text generation
 

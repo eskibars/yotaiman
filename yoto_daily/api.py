@@ -6,6 +6,8 @@ than one application in the same process -- which the tests do.
 
 from __future__ import annotations
 
+import uuid
+from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -15,9 +17,14 @@ from yoto.errors import SessionExpired, YotoError
 from .capabilities import base as caps
 from .content.books import describe_formats
 from .content.text import topic_suggestions
+from .gate import rate_limited
+from .security import scrub_paths
 from .tracks import TrackError, TrackRequest
 
 api = Blueprint("api", __name__, url_prefix="/api")
+
+#: How large a fetched cover image may be, in bytes.
+MAX_COVER_BYTES = 20 * 1024 * 1024
 
 
 # ----------------------------------------------------------------------
@@ -44,7 +51,26 @@ def _token_refresh() -> dict[str, Any]:
     refresher = current_app.extensions.get("token_refresher")
     if refresher is None:
         return {"enabled": False, "running": False}
-    return refresher.status()
+    status = dict(refresher.status())
+    status["error"] = scrub_paths(str(status.get("error") or ""))
+    return status
+
+
+def _scrubbed(value: Any) -> Any:
+    """A value with the absolute paths taken out of it."""
+    if isinstance(value, str):
+        return scrub_paths(value)
+    return value
+
+
+def _capability_payload(result: Any) -> dict[str, Any]:
+    """A capability result, without the absolute paths in it."""
+    payload = result.to_dict()
+    payload["message"] = scrub_paths(str(payload.get("message") or ""))
+    payload["data"] = {
+        key: _scrubbed(value) for key, value in (payload.get("data") or {}).items()
+    }
+    return payload
 
 
 def _error(message: str, status: int = 400, **extra: Any):
@@ -54,20 +80,35 @@ def _error(message: str, status: int = 400, **extra: Any):
 
 
 def _guard(fn):
-    """Turn SDK errors into clean JSON responses."""
+    """Turn SDK errors into clean JSON responses.
+
+    The detail of an unexpected failure goes to the service log rather than
+    to the caller: a traceback names the files and the directories the
+    service runs in, which is nobody else's business.  The caller gets a
+    reference to look up in the log.
+    """
 
     def wrapper(*args: Any, **kwargs: Any):
         try:
             return fn(*args, **kwargs)
         except SessionExpired as exc:
-            return _error(str(exc), 401, instructions=exc.relogin_instructions)
+            return _error(
+                "the Yoto session has expired; refresh the cookie jar",
+                401,
+                instructions=exc.relogin_instructions,
+            )
         except TrackError as exc:
-            return _error(str(exc), 400)
+            return _error(scrub_paths(str(exc)), 400)
         except YotoError as exc:
-            return _error(str(exc), getattr(exc, "status", 502) or 502)
-        except Exception as exc:  # pragma: no cover - defensive
-            current_app.logger.exception("unhandled error")
-            return _error(f"{type(exc).__name__}: {exc}", 500)
+            return _error(scrub_paths(str(exc)), getattr(exc, "status", 502) or 502)
+        except Exception:  # pragma: no cover - defensive
+            reference = uuid.uuid4().hex[:12]
+            current_app.logger.exception("unhandled error (reference %s)", reference)
+            return _error(
+                "something went wrong; the service log has the detail "
+                f"(reference {reference})",
+                500,
+            )
 
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -333,22 +374,64 @@ def set_cover(card_id: str):
         import os
         import tempfile
 
-        import requests
+        from .security import (
+            SecurityError,
+            UnsafePathError,
+            UnsafeURLError,
+            read_capped,
+            resolve_within,
+            safe_fetch,
+        )
 
         source = url or path
-        if not source.startswith(("http://", "https://")):
-            local = source
-        else:
-            resp = requests.get(source, timeout=120)
-            resp.raise_for_status()
-            suffix = "." + source.split("?")[0].rsplit(".", 1)[-1]
+        # Only http and https are fetched.  Anything else with a scheme --
+        # file:, ftp:, data: -- is refused rather than treated as a path.
+        # The check is on "://" rather than on the colon, so that a Windows
+        # drive letter is still a drive letter.
+        fetched = False
+
+        if "://" in source and not source.lower().startswith(("http://", "https://")):
+            return _error("only http and https URLs are allowed", 400)
+
+        if source.lower().startswith(("http://", "https://")):
+            try:
+                resp = safe_fetch(source, timeout=120)
+            except UnsafeURLError as exc:
+                return _error(f"refusing to fetch that URL: {exc}", 400)
+            except Exception as exc:
+                return _error(f"could not fetch that URL: {exc}", 400)
+            if resp.status_code >= 400:
+                resp.close()
+                return _error(
+                    f"fetching that URL returned HTTP {resp.status_code}", 400
+                )
+            suffix = Path(source.split("?")[0]).suffix or ".img"
+            try:
+                payload = read_capped(resp, MAX_COVER_BYTES)
+            except SecurityError as exc:
+                return _error(str(exc), 400)
+            finally:
+                resp.close()
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
-                handle.write(resp.content)
+                handle.write(payload)
                 local = handle.name
+            fetched = True
+        else:
+            # A local path is confined to the content directories, so the
+            # endpoint cannot be used to read an arbitrary file.
+            try:
+                local = str(resolve_within(_settings().content_dirs, source))
+            except UnsafePathError as exc:
+                return _error(str(exc), 400)
+            if not Path(local).exists():
+                return _error("no such file", 400)
+
         try:
             cover = _yoto().media.upload_cover_image(local)
         finally:
-            if local != source:
+            # Only the copy this endpoint made is removed; a file the
+            # operator pointed at is left alone.
+            if fetched:
                 os.unlink(local)
     else:
         return _error("provide an image file, a 'url' or a 'path'")
@@ -370,6 +453,8 @@ def set_cover(card_id: str):
 def add_track(card_id: str):
     """Add a track: stream, file, or generated."""
     track_request = TrackRequest.from_dict(_body())
+    if track_request.type == "generate" and rate_limited():
+        return _error("too many generated tracks; slow down", 429)
     result = current_app.extensions["tracks"].add(card_id, track_request)
     return jsonify(result)
 
@@ -419,8 +504,10 @@ def list_capabilities():
 @api.post("/capabilities/<name>")
 @_guard
 def run_capability(name: str):
+    if rate_limited():
+        return _error("too many requests; slow down", 429)
     result = caps.run_safely(name, **_body())
-    return jsonify(result.to_dict()), (200 if result.ok else 400)
+    return jsonify(_capability_payload(result)), (200 if result.ok else 400)
 
 
 @api.get("/topics")
@@ -444,13 +531,16 @@ def daily_status():
     if card_id:
         try:
             payload["card"] = _card_payload(_yoto().cards.get(card_id))
-        except Exception as exc:
-            payload["card_error"] = str(exc)
+        except Exception:
+            current_app.logger.exception("could not read the daily card")
+            payload["card_error"] = "the daily card could not be read"
     return jsonify(payload)
 
 
 @api.post("/daily")
 @_guard
 def publish_daily():
+    if rate_limited():
+        return _error("too many requests; slow down", 429)
     result = caps.run_safely("daily-story", **_body())
-    return jsonify(result.to_dict()), (200 if result.ok else 400)
+    return jsonify(_capability_payload(result)), (200 if result.ok else 400)

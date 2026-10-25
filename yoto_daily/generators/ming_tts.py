@@ -306,11 +306,13 @@ class MingTTSSpeechGenerator(SpeechGenerator):
         if not reference:
             return "no reference_wav is configured"
         if not Path(reference).expanduser().exists():
-            return f"the reference clip {reference} does not exist"
+            # The path itself is not echoed: this note is shown to whoever
+            # asks the service about its generators.
+            return "the reference clip does not exist"
         model = self._resolved_model_path()
         if model is None:
             return f"the checkpoint will be pulled from {self.repo_id} on first use"
-        return f"checkpoint at {model}, cloning {Path(reference).name}"
+        return f"the checkpoint is in place, cloning {Path(reference).name}"
 
     # ------------------------------------------------------------------
     # model plumbing

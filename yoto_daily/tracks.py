@@ -39,6 +39,11 @@ from .generators import GeneratorRegistry, MusicSpec
 from .generators.base import AudioResult
 
 
+#: How large a fetched file may be, in bytes.  Generous for an audio file,
+#: and small enough that a caller cannot fill the disk through one request.
+MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+
+
 class TrackError(RuntimeError):
     """Raised when a track request cannot be satisfied."""
 
@@ -180,7 +185,7 @@ class TrackService:
         url = request.params.get("url")
 
         if path:
-            source = Path(str(path)).expanduser()
+            source = self._resolve_content_path(str(path))
             if not source.exists():
                 raise TrackError(f"no such file: {source}")
             title = request.title or source.stem
@@ -231,24 +236,48 @@ class TrackService:
             ],
         }
 
-    def _download(self, url: str) -> Path:
-        import requests
+    def _resolve_content_path(self, candidate: str) -> Path:
+        """A caller-supplied path, confined to the content directories.
+
+        A path that names a file outside every configured content
+        directory is refused, so a caller cannot use the service to read
+        whatever the account can reach.
+        """
+        from .security import UnsafePathError, resolve_within
 
         try:
-            resp = requests.get(url, timeout=300, stream=True)
+            return resolve_within(self.settings.content_dirs, candidate)
+        except UnsafePathError as exc:
+            raise TrackError(str(exc)) from exc
+
+    def _download(self, url: str) -> Path:
+        from .security import SecurityError, UnsafeURLError, read_capped, safe_fetch
+
+        try:
+            resp = safe_fetch(url, timeout=300)
+        except UnsafeURLError as exc:
+            raise TrackError(f"refusing to fetch that URL: {exc}") from exc
         except Exception as exc:
             raise TrackError(f"could not fetch {url}: {exc}") from exc
+
         if resp.status_code >= 400:
+            resp.close()
             raise TrackError(f"fetching {url} returned HTTP {resp.status_code}")
 
         suffix = Path(url.split("?")[0]).suffix or ".mp3"
         handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
         try:
-            for chunk in resp.iter_content(1024 * 64):
-                if chunk:
-                    handle.write(chunk)
-        finally:
+            handle.write(read_capped(resp, MAX_DOWNLOAD_BYTES))
+        except SecurityError as exc:
             handle.close()
+            Path(handle.name).unlink(missing_ok=True)
+            raise TrackError(str(exc)) from exc
+        except Exception:
+            handle.close()
+            Path(handle.name).unlink(missing_ok=True)
+            raise
+        finally:
+            resp.close()
         return Path(handle.name)
 
     # ------------------------------------------------------------------
@@ -381,7 +410,11 @@ class TrackService:
         limit = int(limit) if limit else None
 
         try:
-            book = read_book(str(source), max_words=max_words)
+            book = read_book(
+                str(source),
+                max_words=max_words,
+                content_dirs=self.settings.content_dirs,
+            )
         except BookError as exc:
             raise TrackError(str(exc)) from exc
 

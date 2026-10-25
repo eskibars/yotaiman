@@ -4,6 +4,7 @@ Subcommands::
 
     yotaiman serve                       start the service
     yotaiman daily [--topic T]           publish today's story now
+    yotaiman token                       print the token the service expects
     yotaiman status                      show the service state
 """
 
@@ -17,6 +18,8 @@ import sys
 from .app import create_app
 from .capabilities import base as caps
 from .config import Settings
+from .security import allowed_hosts as _allowed_hosts
+from .security import load_api_token
 from .state import StateStore
 from yoto import Yoto
 from yoto._env import load_env_files
@@ -44,10 +47,56 @@ def _interval_label(seconds: int) -> str:
     return f"{seconds} s"
 
 
+def _bind_host(settings: Settings) -> str:
+    """The address the service will listen on."""
+    return "0.0.0.0" if settings.allow_remote else settings.host
+
+
+def _check_debug_bind(settings: Settings) -> str | None:
+    """Why the service refuses to start, if it should.
+
+    The debugger hands whoever finds it a shell on the machine, so it is
+    only ever allowed on a loopback bind.  A debug server on the network
+    is remote code execution for anybody who can reach the port.
+    """
+    if not settings.debug:
+        return None
+    host = _bind_host(settings).strip().lower()
+    if host in ("127.0.0.1", "localhost", "::1", "[::1]"):
+        return None
+    return (
+        f"debug mode is on and the service would bind to {host}, which is not "
+        "the loopback interface.  The debugger gives anybody who can reach "
+        "the port a shell on this machine.  Set YOTO_DEBUG=false, or bind to "
+        "127.0.0.1, before turning it on."
+    )
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = Settings.load()
+
+    refusal = _check_debug_bind(settings)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
+
     app = create_app(settings)
-    print(f"yotaiman listening on http://{settings.host}:{settings.port}")
+    bind = _bind_host(settings)
+    print(f"yotaiman listening on http://{bind}:{settings.port}")
+
+    token = str(app.config.get("YOTO_TOKEN") or "")
+    if settings.auth_enabled and token:
+        print(
+            "This service asks for a token.  Print it with 'yotaiman token', "
+            "or read it from the file next to the other service state."
+        )
+        if settings.allow_remote:
+            allowed = ", ".join(sorted(_allowed_hosts(settings)))
+            print(
+                "The service is open to the network, so the Host header has "
+                f"to be one of: {allowed}.  Set YOTO_ALLOWED_HOSTS to the "
+                "address the phone will use."
+            )
 
     # The token lasts eight hours; the refresher keeps a fresh one in hand
     # so a long run never trips over an expired session.  It mints tokens
@@ -64,7 +113,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     try:
         app.run(
-            host="0.0.0.0" if settings.allow_remote else settings.host,
+            host=bind,
             port=settings.port,
             debug=settings.debug,
         )
@@ -100,6 +149,14 @@ def cmd_daily(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_token(args: argparse.Namespace) -> int:
+    """Print the token the service expects."""
+    settings = Settings.load()
+    settings.ensure_dirs()
+    print(load_api_token(settings.state_dir))
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     settings = Settings()
     state = settings.state_file
@@ -129,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--voice")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_daily)
+
+    p = sub.add_parser("token", help="Print the API token")
+    p.set_defaults(func=cmd_token)
 
     p = sub.add_parser("status", help="Show the service state")
     p.set_defaults(func=cmd_status)

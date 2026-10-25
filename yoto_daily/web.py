@@ -26,11 +26,14 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 
 from .capabilities import base as caps
 from .content.books import describe_formats
+from .gate import SESSION_KEY, rate_limited, safe_next
+from .security import scrub_paths, token_matches
 from .tracks import TrackError, TrackRequest
 
 web = Blueprint("web", __name__)
@@ -89,6 +92,32 @@ def _state():
 # ----------------------------------------------------------------------
 # pages
 # ----------------------------------------------------------------------
+@web.route("/unlock", methods=["GET", "POST"])
+def unlock():
+    """The sign-in page.
+
+    The service asks for a token before it will show the shelf.  The token
+    lives in the state directory; the operator pastes it here, or opens the
+    desk with ``?token=...`` in the address bar, which is the only option on
+    a phone that cannot set a header.
+    """
+    target = safe_next(request.values.get("next"))
+
+    if request.method == "GET":
+        if session.get(SESSION_KEY):
+            return redirect(target)
+        return render_template("unlock.html", next=target)
+
+    supplied = (request.form.get("token") or "").strip()
+    expected = str(current_app.config.get("YOTO_TOKEN") or "")
+    if not expected or not token_matches(supplied, expected):
+        flash("That is not the token this service is expecting.", "error")
+        return redirect(url_for("web.unlock", next=request.form.get("next", "")))
+
+    session[SESSION_KEY] = True
+    return redirect(target)
+
+
 @web.get("/")
 def index():
     yoto = _yoto()
@@ -112,17 +141,20 @@ def index():
     try:
         yoto.auth.whoami()
         session_ok = True
-        session_error = ""
-    except Exception as exc:
+    except Exception:
+        current_app.logger.exception("could not check the Yoto session")
         session_ok = False
-        session_error = str(exc)
 
     # The background refresher reports what it last managed to do, so a
     # session that has lapsed is visible before it turns into a failed
     # request.
     refresher = current_app.extensions.get("token_refresher")
     refresh = refresher.status() if refresher is not None else {"enabled": False}
-    refresh_error = refresh.get("error", "") if refresh.get("last_ok") is False else ""
+    refresh_error = (
+        scrub_paths(str(refresh.get("error", "")))
+        if refresh.get("last_ok") is False
+        else ""
+    )
 
     return render_template(
         "index.html",
@@ -132,7 +164,6 @@ def index():
         last_story=state.get("last_story", {}),
         last_run=state.get("last_run", ""),
         session_ok=session_ok,
-        session_error=session_error,
         refresh=refresh,
         refresh_error=refresh_error,
         duration=_duration,
@@ -243,10 +274,11 @@ def add_track_submit(card_id: str):
     try:
         result = current_app.extensions["tracks"].add(card_id, track_request)
     except TrackError as exc:
-        flash(str(exc), "error")
+        flash(scrub_paths(str(exc)), "error")
         return redirect(url_for("web.add_track", card_id=card_id))
-    except Exception as exc:  # pragma: no cover - defensive
-        flash(f"{type(exc).__name__}: {exc}", "error")
+    except Exception:  # pragma: no cover - defensive
+        current_app.logger.exception("could not add the track")
+        flash("Something went wrong; the service log has the detail.", "error")
         return redirect(url_for("web.add_track", card_id=card_id))
 
     flash(result.get("message", "Added the track."), "success")
@@ -267,8 +299,9 @@ def save_options(card_id: str):
                 "hide_track_numbers": form.get("hide_track_numbers") == "on",
             },
         )
-    except Exception as exc:
-        flash(f"Could not save the options: {exc}", "error")
+    except Exception:
+        current_app.logger.exception("could not save the options")
+        flash("Could not save the options; the service log has the detail.", "error")
         return redirect(url_for("web.card", card_id=card_id))
 
     if form.get("clear_tracks") == "on":
@@ -283,8 +316,9 @@ def delete_track(card_id: str, key: str):
     try:
         _yoto().cards.delete_track(card_id, key)
         flash(f"Deleted track {key}.", "success")
-    except Exception as exc:
-        flash(f"Could not delete track {key}: {exc}", "error")
+    except Exception:
+        current_app.logger.exception("could not delete the track")
+        flash(f"Could not delete track {key}; the service log has the detail.", "error")
     return redirect(url_for("web.card", card_id=card_id))
 
 
@@ -296,15 +330,19 @@ def delete_card(card_id: str):
         if state.get("daily_card_id") == card_id:
             state.set("daily_card_id", "")
         flash(f"Deleted card {card_id}.", "success")
-    except Exception as exc:
-        flash(f"Could not delete the card: {exc}", "error")
+    except Exception:
+        current_app.logger.exception("could not delete the card")
+        flash("Could not delete the card; the service log has the detail.", "error")
     return redirect(url_for("web.index"))
 
 
 @web.post("/daily")
 def publish_daily():
+    if rate_limited():
+        flash("Too many stories in a row. Give it a minute.", "error")
+        return redirect(url_for("web.index"))
     result = caps.run_safely("daily-story", **request.form.to_dict())
-    flash(result.message, "success" if result.ok else "error")
+    flash(scrub_paths(result.message), "success" if result.ok else "error")
     return redirect(url_for("web.index"))
 
 

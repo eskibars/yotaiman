@@ -19,14 +19,21 @@ from yoto_daily.config import Settings  # noqa: E402
 
 @pytest.fixture
 def app(tmp_path):
-    application = create_app(Settings.load())
+    settings = Settings.load()
+    # The configuration comes from the project; the state does not.
+    settings.state_dir = tmp_path / "state"
+    application = create_app(settings)
     application.config["TESTING"] = True
     return application
 
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    test_client = app.test_client()
+    test_client.environ_base["HTTP_AUTHORIZATION"] = (
+        f"Bearer {app.config['YOTO_TOKEN']}"
+    )
+    return test_client
 
 
 def test_both_front_ends_are_registered(app):

@@ -165,7 +165,11 @@ def test_health_reports_the_refresher(tmp_path):
     app = create_app(settings)
     app.config["TESTING"] = True
 
-    body = app.test_client().get("/api/health").get_json()
+    test_client = app.test_client()
+    test_client.environ_base["HTTP_AUTHORIZATION"] = (
+        f"Bearer {app.config['YOTO_TOKEN']}"
+    )
+    body = test_client.get("/api/health").get_json()
 
     refresh = body["token_refresh"]
     assert refresh["enabled"] is True

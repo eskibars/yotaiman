@@ -20,11 +20,38 @@ service:
     - ~/yotaiman
 
 daily:
-  # Leave empty to have the service create and remember its own card.
-  card_id: ""
+  # The card the daily job rewrites. This is the card paired with the
+  # player, so it is named here rather than created: a card nobody has
+  # paired is a card nobody will ever hear.
+  card_id: "1LHgD"
   # replace = one story per day; history = keep the last N days as chapters
   mode: replace
   history_days: 7
+  # The voice the daily capabilities narrate in. It names one of the voices
+  # under generators.speech.options.<name>.voices.
+  voice: dad
+
+theme:
+  # Who the card is written for. The writer uses this to pitch the words.
+  audience: "two children, one about five years old and one about ten"
+  # auto = use the local model if it is there, fall back to the hand-written
+  # themes if it is not. Also: ollama, template.
+  backend: auto
+  # The local Ollama server that writes the story and the song. The facts
+  # are written from the source, not by the model.
+  ollama_endpoint: http://127.0.0.1:11434
+  ollama_model: llama3.2:3b
+  ollama_timeout: 900
+  # How many times to ask the model before giving up and using the
+  # hand-written theme instead. A story that repeats itself or reads as a
+  # list is thrown away and written again.
+  attempts: 3
+  # How long the theme song should be, in seconds. A song in the content
+  # library says how long it wants to be; this is the length used for a
+  # song that does not.
+  song_seconds: 120
+  # How many planets to pull facts about for a themed card.
+  research_facts: 8
 
 generators:
   # ---------------------------------------------------------------
@@ -47,12 +74,13 @@ generators:
         timeout: 900
         poll_interval: 5
         # Defaults for every request; a request may override any of them.
+        # Whether the song has a voice is decided by the request itself, so
+        # there is no instrumental default here.
         defaults:
           audio_format: mp3
           audio_duration: 60
-          inference_steps: 8
+          inference_steps: 16
           thinking: true
-          instrumental: true
 
       # A procedural placeholder. No model, no GPU -- useful for testing
       # the track pipeline end to end.
@@ -65,7 +93,7 @@ generators:
   # Speech
   # ---------------------------------------------------------------
   speech:
-    default: say
+    default: ming-tts
 
     options:
       # macOS say. No credentials, no server.
@@ -100,20 +128,40 @@ generators:
         # The clip to clone, and the exact words spoken in it.
         # The file has to exist here -- the generator reports it as
         # unavailable until it does.
-        reference_wav: ~/yotaiman/my_voice.wav
-        reference_text: "the exact words spoken in the clip"
+        # reference_wav: ~/yotaiman/my_voice.wav
+        # reference_text: 
         # Optional delivery instruction. Set one and the model narrates in
         # that style, still in the cloned voice.
-        instruction: "Speak in a warm, intimate storytelling voice, unhurried."
+        instruction: "Read slowly and deliberately, the way a parent reads a children's storybook out loud. Warm, clear and patient, with a little wonder, and a smile in the voice."
         use_spk_emb: true
         # Needs pynini, which has no Windows wheel. Leave it off there.
         text_normalization: false
+        # The model reads faster than a person reads a story aloud. The
+        # audio is time-stretched afterwards to bring it down to a
+        # storybook pace; the pitch is kept, so the voice still sounds
+        # like a voice. 1.0 is the model's own pace.
+        speech_rate: 0.62
+        # The model has no grammar to normalise numbers with, so they are
+        # written out before it sees them.
+        spell_numbers: true
+        # The voice used when a request does not name one.
+        voice: dad
         # Named voices, picked with the "voice" parameter.
+        #
+        # The clip has to be short. Ming-3.0-tts shares one 512-position
+        # budget between the reference clip, its transcript and the words it
+        # speaks, so a long clip leaves almost nothing to say. Between three
+        # and eight seconds is the useful range -- cut a longer recording
+        # with:
+        #
+        #   yotaiman prepare-voice --wav recording.wav \
+        #       --out-wav voice/reference.wav --out-text voice/reference.txt \
+        #       --transcript recording.txt
         voices:
           dad:
-            reference_wav: ~/yotaiman/dad.wav
-            reference_text: "the exact words spoken in dad.wav"
-            instruction: "Speak in a warm, intimate storytelling voice, unhurried."
+            reference_wav: voice/shane-reference.wav
+            reference_text: "Hi, my name is Shane, and this recording is the raw material for a small voice model I want to train on my own speech."
+            instruction: "Read slowly and deliberately, the way a parent reads a children's storybook out loud. Warm, clear and patient, with a little wonder, and a smile in the voice."
 
       # A local TTS model server. The contract is:
       #   POST <url>  {"text": "...", "voice": "..."}  ->  audio bytes

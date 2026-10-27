@@ -105,8 +105,10 @@ class AceStepMusicGenerator(MusicGenerator):
             payload["time_signature"] = spec.time_signature
         if spec.duration:
             payload["audio_duration"] = spec.duration
-        if spec.instrumental:
-            payload["instrumental"] = True
+        # The spec always knows whether it wants a voice, so it wins over a
+        # server-wide default.  A song with lyrics needs ``instrumental``
+        # to be false, or the words are never sung.
+        payload["instrumental"] = bool(spec.instrumental)
         if spec.seed is not None:
             payload["seed"] = spec.seed
             payload["use_random_seed"] = False
@@ -140,6 +142,7 @@ class AceStepMusicGenerator(MusicGenerator):
         audio_path = self._download(result, out_path)
         return AudioResult(
             path=audio_path,
+            duration=self._probe_duration(audio_path),
             backend=self.name,
             metadata={
                 "task_id": task_id,
@@ -151,6 +154,26 @@ class AceStepMusicGenerator(MusicGenerator):
                 "generation_info": result.get("generation_info", ""),
             },
         )
+
+    def _probe_duration(self, path: Path) -> float:
+        """How long the rendered audio is, in seconds.
+
+        ACE-Step reports the length it was asked for, which is not the
+        length it produced, and the card shows a duration bar.
+        """
+        import subprocess
+
+        try:
+            proc = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=nw=1:nk=1", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            return float((proc.stdout or "0").strip() or 0)
+        except (ValueError, OSError, subprocess.SubprocessError):
+            return 0.0
 
     def _wait(self, task_id: str) -> dict[str, Any]:
         """Poll ``/query_result`` until the task succeeds or fails."""

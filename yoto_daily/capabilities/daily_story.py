@@ -206,18 +206,16 @@ class DailyStoryCapability(Capability):
 
     # ------------------------------------------------------------------
     def _daily_card_id(self) -> str:
-        """Return the daily card id, creating the card on first use."""
-        configured = self.settings.daily_card_id
-        if configured:
-            return configured
+        """Return the daily card id, creating the card only if there is
+        nothing to adopt."""
+        from ..daily_card import daily_card_id
 
-        stored = self.state.get("daily_card_id", "")
-        if stored and self.yoto.cards.exists(stored):
-            return stored
-
-        card = self.yoto.cards.create(title=f"Daily - {date.today().isoformat()}")
-        self.state.set("daily_card_id", card.card_id)
-        return card.card_id
+        return daily_card_id(
+            self.yoto,
+            self.state,
+            self.settings,
+            title=f"Daily - {date.today().isoformat()}",
+        )
 
     def _history_chapters(self, card_id: str, story: Any, upload: Any, title: str) -> list[Any]:
         """Rebuild the chapter list: today's story first, older ones after."""

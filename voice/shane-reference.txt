@@ -1,0 +1,1 @@
+Hi, my name is Shane, and this recording is the raw material for a small voice model I want to train on my own speech.

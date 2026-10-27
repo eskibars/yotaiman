@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import AudioResult, SpeechGenerator
+from ..numbers import spell_numbers
 
 #: Where the weights land when they have to be downloaded.
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "yotaiman" / "models"
@@ -98,6 +99,38 @@ def _candidate_code_paths() -> list[Path]:
     return seen
 
 
+def _atempo_filter(rate: float) -> str:
+    """The ffmpeg filter that changes the pace of the narration.
+
+    The model reads faster than a person reads a story aloud -- around
+    two hundred and forty words a minute against a hundred and forty-five
+    for a storybook -- and asking it politely in the instruction moves it
+    by about ten per cent.  Time-stretching the audio afterwards does the
+    rest, and it keeps the pitch, so the voice still sounds like a voice
+    and not like a recording played slowly.
+
+    ``atempo`` only accepts values between one half and two, so a bigger
+    change is a chain of them.
+    """
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        return ""
+    if not rate or abs(rate - 1.0) < 0.02:
+        return ""
+
+    parts: list[str] = []
+    remaining = rate
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    parts.append(f"atempo={remaining:.4f}")
+    return ",".join(parts)
+
+
 def _probe_duration(path: Path, ffmpeg_command: str = "ffmpeg") -> float:
     """Best-effort duration of an audio file in seconds."""
     proc = subprocess.run(
@@ -138,6 +171,8 @@ class MingTTSSpeechGenerator(SpeechGenerator):
         instruction: str = "",
         use_spk_emb: bool = True,
         text_normalization: bool = False,
+        speech_rate: float = 1.0,
+        spell_numbers: bool = True,
         ffmpeg_command: str = "ffmpeg",
         voice: str = "",
         voices: dict[str, dict[str, Any]] | None = None,
@@ -155,6 +190,8 @@ class MingTTSSpeechGenerator(SpeechGenerator):
         self.instruction = instruction
         self.use_spk_emb = use_spk_emb
         self.text_normalization = text_normalization
+        self.speech_rate = speech_rate
+        self.spell_numbers = spell_numbers
         self.ffmpeg_command = ffmpeg_command
         self.default_voice = voice
         self.voices = dict(voices or {})
@@ -166,6 +203,8 @@ class MingTTSSpeechGenerator(SpeechGenerator):
             "instruction": instruction,
             "use_spk_emb": use_spk_emb,
             "text_normalization": text_normalization,
+            "speech_rate": speech_rate,
+            "spell_numbers": spell_numbers,
             "auto_download": auto_download,
             "voices": sorted(self.voices) or ([self.default_voice] if self.default_voice else []),
         }
@@ -436,6 +475,13 @@ class MingTTSSpeechGenerator(SpeechGenerator):
         model = self._load_model()
         prompt_latent, spk_emb = self._prompt(model, config)
         max_length = self._fragment_budget(model, prompt_latent, reference_text)
+
+        # The numbers are written out before the text is split, because
+        # the split normalises the punctuation to full width, and a
+        # full-width comma is not a comma any more.
+        if self.spell_numbers and not self.text_normalization:
+            text = spell_numbers(text)
+
         fragments = self._split_text(text, max_length)
 
         task = "FREEFORM" if delivery else "TTS"
@@ -458,28 +504,38 @@ class MingTTSSpeechGenerator(SpeechGenerator):
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if out_path.suffix.lower() == ".wav":
-            self._write_wav(out_path, chunks, sample_rate)
-        else:
-            with tempfile.TemporaryDirectory() as tmp:
-                wav_path = Path(tmp) / "speech.wav"
-                self._write_wav(wav_path, chunks, sample_rate)
-                proc = subprocess.run(
-                    [
-                        self.ffmpeg_command, "-y", "-loglevel", "error",
-                        "-i", str(wav_path),
-                        "-ac", "1", "-ar", "44100",
-                        "-c:a", "libmp3lame", "-b:a", "64k",
-                        str(out_path),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=1800,
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "speech.wav"
+            self._write_wav(wav_path, chunks, sample_rate)
+            command = [
+                self.ffmpeg_command, "-y", "-loglevel", "error",
+                "-i", str(wav_path),
+            ]
+            filters = _atempo_filter(self.speech_rate)
+            if filters:
+                command += ["-filter:a", filters]
+            if out_path.suffix.lower() == ".wav":
+                command += [
+                    "-ac", "1", "-ar", "44100",
+                    "-c:a", "pcm_s16le",
+                    str(out_path),
+                ]
+            else:
+                command += [
+                    "-ac", "1", "-ar", "44100",
+                    "-c:a", "libmp3lame", "-b:a", "64k",
+                    str(out_path),
+                ]
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"ffmpeg failed: {(proc.stderr or proc.stdout)[:300]}"
                 )
-                if proc.returncode != 0:
-                    raise RuntimeError(
-                        f"ffmpeg failed: {(proc.stderr or proc.stdout)[:300]}"
-                    )
 
         return AudioResult(
             path=out_path,
@@ -490,6 +546,7 @@ class MingTTSSpeechGenerator(SpeechGenerator):
                 "fragments": len(fragments),
                 "task": task,
                 "instruction": delivery,
+                "speech_rate": self.speech_rate,
             },
         )
 
@@ -526,6 +583,8 @@ def build_ming_tts_generator(name: str, entry: dict[str, Any]) -> MingTTSSpeechG
         instruction=str(entry.get("instruction") or ""),
         use_spk_emb=bool(entry.get("use_spk_emb", True)),
         text_normalization=bool(entry.get("text_normalization", False)),
+        speech_rate=float(entry.get("speech_rate", 1.0) or 1.0),
+        spell_numbers=bool(entry.get("spell_numbers", True)),
         ffmpeg_command=str(entry.get("ffmpeg_command") or "ffmpeg"),
         voice=str(entry.get("voice") or ""),
         voices=dict(entry.get("voices") or {}),

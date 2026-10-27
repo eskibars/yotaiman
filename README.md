@@ -8,14 +8,17 @@ Yoto's media pipeline and rewrites a card — so a single physical card can carr
 a fresh story every morning.
 
 ```
-topic -> text -> speech -> upload -> transcode -> card write
+theme -> research -> text -> voice -> music -> upload -> card write
+                         \\-> a folder for the day
 ```
 
-Two capabilities ship working:
+Four capabilities ship working:
 
 | capability | what it does |
 |---|---|
+| `daily-theme` | Builds today's themed card: a story, a song and the checked facts, all in one voice. |
 | `daily-story` | Writes a story about a topic, narrates it, publishes it as the daily card. |
+| `restore-day` | Puts a saved day back on the card, exactly as it was. |
 | `read-aloud` | Narrates text you supply (a story typed on a phone, a book chapter) onto any card. |
 
 The Yoto API is not publicly documented. Everything this project knows about it
@@ -42,6 +45,11 @@ python -m yoto.auth bootstrap
 # 2. Publish today's story.
 python -m yoto_daily daily --topic dolphins --child-name "Alex"
 
+# 2b. Or publish today's themed card: two stories, two songs, an explainer
+#     and the facts, in your own voice, with a picture next to each track.
+#     See "Themed cards" below.
+python -m yoto_daily theme exoplanets
+
 # 3. Or run the service.
 #    The HTML desk is at http://127.0.0.1:8787/
 #    The JSON API is at http://127.0.0.1:8787/api/
@@ -57,6 +65,248 @@ mints its own access tokens without a browser. See
 
 Installing the package also puts a `yotaiman` command on your path.
 `python -m yoto_daily ...` does the same thing if you would rather not install.
+
+---
+
+## Themed cards
+
+A card is a theme. "Exoplanets" is a card; "Dinosaurs" is a card; whatever
+you like is a card. One physical card is enough — the daily job rewrites it
+each morning with the day's theme, so the card in a child's hand is always
+about whatever that day's theme is.
+
+```bash
+python -m yoto_daily theme exoplanets
+```
+
+That one command does the whole morning:
+
+1. **Research.** The facts come from a source, not from a model's memory.
+   For exoplanets that is the NASA Exoplanet Archive, queried live.
+2. **Plan.** The theme becomes a playlist: two stories, two songs, an
+   explainer and a fact corner, in that order. A story is followed by the
+   song that goes with it, and the true parts come last.
+3. **Narrate.** The stories, the explainer and the facts are read out loud
+   in your cloned voice, by [Ming-3.0-tts](#speech), at a storybook pace.
+4. **Compose.** ACE-Step writes the songs, with lyrics from the plan. Two
+   to four minutes each, because a forty-second song is not a song a child
+   learns.
+5. **Draw.** Every track gets a 16×16 picture — a book for a story, a
+   note for a song, a star for the facts. See [Pixel art](#pixel-art).
+6. **Publish.** The tracks go on the card, under one chapter named after
+   the theme, on the card that is paired with your player.
+7. **Save.** Everything is written to a folder of its own — see
+   [Days on disk](#days-on-disk).
+
+A themed card runs to **at least ten minutes**. The exoplanets card is
+about twenty-two: two stories of five minutes each, a three-minute song
+and a two-minute song, and then the explainer and the facts.
+
+The audience is set in `config.yaml`:
+
+```yaml
+theme:
+  audience: "two children, one about five years old and one about ten"
+```
+
+Every part can be turned off while you are trying something:
+
+```bash
+python -m yoto_daily theme exoplanets --plan-only   # what would go on it
+python -m yoto_daily theme exoplanets --no-song
+python -m yoto_daily theme exoplanets --voice dad --instruction "slow and sleepy"
+```
+
+### The words are written by hand, not by the model
+
+This is the one rule worth keeping. A small local model can write a decent
+sentence. It cannot write a story a child wants to hear twice, and it
+cannot write facts that are both true and worth hearing — a model given
+eight sets of numbers to restate will eventually mix them up, and a child
+listening to a wrong number is worse off than one listening to no number
+at all.
+
+So the themes that matter live in `yoto_daily/content/library.py`, written
+by hand, with every number checked against the NASA Exoplanet Archive. The
+model is only asked for topics the library does not cover, and when it is
+asked it writes the story and the song while the facts are handed over
+already finished.
+
+A library theme is also a *long* theme, because it was written to be one:
+two stories, two songs, an explainer and a fact corner. A model-written
+theme is three tracks — a story, a song and the facts — and the card says
+so.
+
+To add a theme, add a `Segment` to the library and give it a slug:
+
+```python
+Segment(
+    kind="story",                  # story | song | facts | explainer
+    title="The Year That Lasted Six Days",
+    subject="TRAPPIST-1 e",        # picks the picture, too
+    text="""Hello you two. ...""",
+)
+```
+
+### The card is adopted, never invented
+
+A Yoto card is paired with a player in the Yoto app. The card that is
+paired is the one that matters: content written to a card nobody has paired
+is a card nobody will ever hear. So the daily card is adopted, in this
+order:
+
+1. `daily.card_id` in `config.yaml` — the strongest statement of intent
+2. the id remembered from the last run
+3. an existing card whose title looks like the daily card, for the case
+   where the state file was lost but the card is still there
+4. only then, a new card
+
+```yaml
+daily:
+  card_id: "1LHgD"      # the card paired with your player
+```
+
+---
+
+## Pixel art
+
+The Yoto app and the player show a little 16×16 picture next to each
+track. The pictures are drawn in code rather than shipped as files, in
+`yoto_daily/pixelart.py`, so changing what a story looks like is a
+one-line edit:
+
+```python
+from yoto_daily.pixelart import preview
+
+print(preview(pixelart.icon_for("story", "TRAPPIST-1 e")))
+```
+
+```
+      ###                    
+     ##  ##                   
+    ##      ##                 
+   ##        ##                
+  ##          ##               
+ ##            ##              
+ #              #             
+ #              #             
+ #              #             
+ #              #             
+ #              #             
+  #            #              
+  ##          ##              
+   ##        ##               
+    ##      ##                
+     ##  ##                   
+      ###                    
+```
+
+There are seven shapes — a book, a note, a star, a telescope, two suns, a
+clock and a planet — and each kind of track gets one by default. A track
+that names a planet gets the planet; one that is about a year gets the
+clock; one about how we found them gets the telescope. A segment in the
+content library says which picture it wants, and that always wins.
+
+Each picture is uploaded once and then shared by every track that wants
+the same picture, so a six-track card does not carry six copies of the
+same book. The ids are remembered in the state file, so tomorrow's card
+reuses them.
+
+The card gets a cover as well: the theme's picture, blown up on a night
+sky, drawn at 512×512 and uploaded to the card's cover slot. It is drawn
+the same way, so a new theme gets a new cover without anybody opening an
+image editor.
+
+---
+
+## Days on disk
+
+A card on Yoto is a pointer to media that lives on somebody else's server.
+That is a thin thing to own a year of mornings with, so every run writes the
+day out as well:
+
+```
+~/.config/yotaiman/work/2026-10-27-exoplanets/
+  manifest.json                        how the card was put together
+  01-the-year-that-lasted-six-days.txt  the words of the story
+  01-the-year-that-lasted-six-days.mp3  the story, in your voice
+  02-six-days.txt                     the lyrics
+  02-six-days.mp3                     the song
+  03-two-suns-in-the-sky.txt          the words of the second story
+  03-two-suns-in-the-sky.mp3          the second story, in your voice
+  04-two-suns.txt                     the lyrics
+  04-two-suns.mp3                     the song
+  05-how-we-found-them.txt            the words of the explainer
+  05-how-we-found-them.mp3            the explainer, in your voice
+  06-fact-corner.txt                  the words of the facts
+  06-fact-corner.mp3                  the facts, in your voice
+```
+
+The transcripts and the audio sit next to a manifest that says how the card
+was built, so any morning can be put back exactly as it was:
+
+```bash
+python -m yoto_daily days                    # what is saved
+python -m yoto_daily restore --date 2026-10-27   # put it back on the card
+python -m yoto_daily restore --slug exoplanets  # by theme, newest first
+```
+
+Restoring re-uploads the audio from the folder and rewrites the card, so it
+works even if the card has moved on to a later theme. The folder is the
+source of truth; the card is a copy of it.
+
+A build that is interrupted picks up where it stopped: the audio already in
+the folder is reused rather than made again, so re-running the theme after a
+crash costs minutes rather than an afternoon.
+
+---
+
+## Your voice, as a reference clip
+
+Ming-3.0-tts clones a voice from a short clip and its exact transcript. The
+clip has to be short. The model shares one 512-position budget between the
+reference clip, its transcript and the words it has to speak, so a long
+clip does not merely sound worse — it eats the budget, and what is left is
+enough for a handful of words.
+
+The recording you actually make is a minute and a half of you reading a
+script. `prepare-voice` cuts it down:
+
+```bash
+python -m yoto_daily prepare-voice \
+    --wav my-recording.wav \
+    --out-wav voice/reference.wav \
+    --out-text voice/reference.txt \
+    --transcript my-recording.txt
+```
+
+It finds a window of speech between three and eight seconds long, prefers
+one that starts at the beginning of a sentence and runs without a long
+pause, and cuts the audio to match. The words are taken from **your**
+transcript, not from the speech recogniser: the recogniser only supplies
+the timings, so the spelling, the punctuation and the capitalisation are
+the ones you wrote. A model that conditions on a mis-heard word reproduces
+the mis-heard word.
+
+Then point a voice at the two files:
+
+```yaml
+generators:
+  speech:
+    default: ming-tts
+    options:
+      ming-tts:
+        type: ming-tts
+        code_path: ../Ming-3.0-tts
+        voice: dad
+        voices:
+          dad:
+            reference_wav: voice/reference.wav
+            reference_text: "the exact words spoken in that clip"
+```
+
+The transcript has to be the words in *that* clip, not the words in the
+whole recording. `prepare-voice` writes the right ones for you.
 
 ---
 
@@ -150,6 +400,9 @@ POST   /api/capabilities/<name> run one capability
 GET    /api/topics              the rotating topic bank
 GET    /api/daily               what is on the daily card right now
 POST   /api/daily               publish today's story
+GET    /api/days                the days that were saved on disk
+POST   /api/days/<date>/restore put a saved day back on the card
+POST   /api/themes              build today's themed card
 ```
 
 ```bash
@@ -162,6 +415,17 @@ curl -s -X POST localhost:8787/api/daily \
      -H "Authorization: Bearer $TOKEN" \
      -H 'Content-Type: application/json' \
      -d '{"topic":"dolphins","child_name":"Alex"}' | jq
+
+# The themed card.
+curl -s -X POST localhost:8787/api/themes \
+     -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"theme":"exoplanets"}' | jq
+
+# The saved days, and putting one back.
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8787/api/days | jq
+curl -s -X POST localhost:8787/api/days/2026-10-26/restore \
+     -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 Every endpoint asks for the token; see
@@ -270,22 +534,36 @@ yoto_daily/              the service
   api.py                 the JSON API blueprint (/api)
   web.py                 the HTML control desk blueprint (/)
   config.py              settings: config.yaml plus the environment
+  daily_card.py          which card is the daily one: adopted, never invented
+  days.py                one folder per day: transcripts, audio, manifest
   gate.py                the perimeter: token, Host, Origin, CSRF
+  icons.py               uploads the little pictures, once per picture
+  numbers.py             writes numbers out so they are read out correctly
+  pixelart.py            the 16x16 pictures, drawn in code
+  research.py            checked facts, from the NASA Exoplanet Archive
   security.py            the guards: safe_fetch, path confinement, token
   state.py               small JSON state store
   token_refresher.py     keeps the access token fresh in the background
   tracks.py              the track service (stream / file / generate)
+  voice.py               cuts a usable voice reference out of a recording
   generators/            music and speech generators
     base.py              MusicSpec, MusicGenerator, SpeechGenerator
+    ming_tts.py          Ming-3.0-tts, narrating in a cloned voice
     music.py             ACE-Step 1.5, and a procedural fallback
     speech.py            macOS say, and a generic HTTP endpoint
     registry.py          builds the generators from config.yaml
   capabilities/          the extension point
     base.py              Capability ABC + registry
     daily_story.py       the daily story
+    daily_theme.py       the themed card: the stories, the songs, the facts
     read_aloud.py        read supplied text
+    restore_day.py       put a saved day back on the card
   content/
+    library.py           the themes written by hand
+    ollama.py            a local Ollama server
+    plan.py              the theme, turned into the tracks of a playlist
     text.py              text generation backends
+    theme.py             themes: a story, a song and the facts
     tts.py               text-to-speech backends
     books.py             mobi / epub / pdf / html / url -> text
   templates/             the Jinja templates for the HTML desk
@@ -511,6 +789,10 @@ generators:
 `reference_wav` is four to eight seconds of clean speech and
 `reference_text` is the **exact** transcript of it — the model conditions on
 the words, so a summary of what was said will not clone the voice properly.
+The clip has to be short: the model shares one 512-position budget between
+the reference, its transcript and the words it speaks, so a long clip leaves
+almost nothing to say. `prepare-voice` cuts a usable clip out of a longer
+recording — see [Your voice, as a reference clip](#your-voice-as-a-reference-clip).
 Leave `model_path` empty and the checkpoint is pulled from the Hub into
 `cache_dir` on first use instead.
 
@@ -533,6 +815,41 @@ realtime on a CPU, which is fine for a card that is refreshed once a day.
 
 Text normalization uses FST grammars that need `pynini`, which has no
 Windows wheel; set `text_normalization: false` there.
+
+### Numbers, and how they are read out
+
+A model that is handed "6,451" says "six four fifty one" — three numbers
+where there should be one — and a child listening learns that a fact about
+planets is a string of digits rather than a quantity.
+
+So the numbers are written out in words before the text reaches the
+narrator, in `yoto_daily/numbers.py`:
+
+| written | read out |
+|---|---|
+| `6,451` | six thousand four hundred and fifty-one |
+| `4.2` | four point two |
+| `-55` | minus fifty-five |
+| `1/2` | one half |
+| `16x16` | sixteen by sixteen |
+| `45%` | forty-five per cent |
+| `1992` | nineteen ninety-two |
+| `2016` | twenty sixteen |
+
+The years are treated specially, because "twenty six" is twenty-six and a
+discovery year is not. A year from 1900 to 2029 is said the way people
+say it.
+
+A **catalogue name** is treated differently again, because it is a name
+and not a measurement. `TRAPPIST-1 e` is "TRAPPIST-one e", and `PSR B1257`
+is "PSR B one two five seven" — the digits one at a time, the way anybody
+says a catalogue number, and never "PSR B one thousand two hundred and
+fifty-seven". A short prefix is an acronym said letter by letter ("H D one
+eight nine seven three three"); a long one is a word ("TRAPPIST" is said
+"trap-ist", not "tee ar ay pee pee eye ess tee").
+
+The same words are written into the transcript beside the audio, so the
+transcript is what was actually said.
 
 **Overriding the delivery per request.** The `instruction` in the
 configuration is the default. Any request may replace it, which is how one
@@ -623,6 +940,28 @@ the command line: importing the library leaves the environment alone.
 | `YOTO_TTS_BACKEND` | `auto` | `auto`, `say`, `http` or `ming-tts`; follows `generators.speech.default` |
 | `YOTO_MING_TTS_CODE_PATH` | *(empty)* | where the Ming-3.0-tts checkout lives |
 | `YOTO_LLM_BACKEND` | `auto` | `auto`, `template`, `script` or `openai` |
+| `YOTO_THEME_BACKEND` | `auto` | `auto`, `ollama` or `template`; `auto` prefers the local model |
+| `YOTO_THEME_AUDIENCE` | *two children* | who the card is written for |
+| `YOTO_THEME_VOICE` | *(empty)* | the named voice the daily capabilities narrate in |
+| `YOTO_THEME_SONG_SECONDS` | `60` | how long the theme song should be |
+| `YOTO_THEME_ATTEMPTS` | `3` | how many times to ask the model before falling back |
+| `YOTO_OLLAMA_ENDPOINT` | `http://127.0.0.1:11434` | the local Ollama server |
+| `YOTO_OLLAMA_MODEL` | `qwen3:1.7b` | the model that writes the story and the song |
+| `YOTO_RESEARCH_FACTS` | `8` | how many planets to pull facts about |
+
+The `theme` section of `config.yaml` holds the same settings, and the
+environment wins over it:
+
+```yaml
+theme:
+  audience: "two children, one about five years old and one about ten"
+  backend: auto                 # auto, ollama, template
+  ollama_endpoint: http://127.0.0.1:11434
+  ollama_model: llama3.2:3b
+  attempts: 3
+  song_seconds: 60
+  research_facts: 8
+```
 
 The state directory was called `~/.config/yoto-daily` before the project was
 renamed. If that directory exists and the new one does not, it is still used,
@@ -687,6 +1026,51 @@ the pipeline never dies for want of a credential.
 
 A backend that fails with an auth or configuration error is skipped for the
 rest of the process, so one broken provider costs one failed call.
+
+### A theme, written locally
+
+The themed card has its own writer, and it is a different job from writing
+a story. A theme is a title, a story, a song and a set of facts, and the
+facts come from a source rather than from the model.
+
+**The content library comes first.** `yoto_daily.content.library` holds
+themes written by hand, and when it has the topic, that is what goes on
+the card — the words are used exactly as they were written, and the model
+is not asked at all. The library exists because a story somebody wrote by
+hand is worth more than a story a small model produced at seven in the
+morning, and because a library theme is a *long* theme: two stories, two
+songs, an explainer and a fact corner, rather than the three tracks a
+model writes.
+
+When the library does not have the topic, the writer below takes over:
+
+`yoto_daily.content.theme` holds it:
+
+| writer | what it does |
+|---|---|
+| `ollama` | asks a model running on this machine |
+| `template` | a hand-written theme bank; needs nothing at all |
+| `fallback` | `ollama` first, `template` when the model is not there |
+
+The local model is reached through `yoto_daily.content.ollama`, a small
+client for the Ollama API. Two details matter:
+
+- **The context window is capped.** Ollama defaults to 32k, and attention
+  is quadratic in it; on a machine without a dedicated GPU that costs
+  minutes per story. The client asks for 8k, which is plenty for these
+  prompts and much faster.
+- **The answer is read as labelled sections, not as JSON.** A model that
+  forgets to escape a quotation mark inside a story does not break the
+  parse. The client also accepts JSON, for models that insist on it.
+
+What comes back is checked before it reaches a card. A story that repeats
+a paragraph, repeats a sentence, runs to fewer than four paragraphs or
+reads as a list of things you will do is thrown away and written again,
+up to `attempts` times. After that the hand-written theme is used, so a
+bad model produces a worse card rather than no card.
+
+Whatever the writer, the facts are handed over already finished. The model
+is asked for a story and a song; it is never asked to restate a number.
 
 ### Text to speech
 
@@ -873,6 +1257,12 @@ URL itself in `trackUrl` and has no media id. Accepted formats are `mp3`,
 `aac`, `alac`, `flac`, `pcm_s16le`, `opus`, `ogg`, `x-m4a`, `wav`, `aiff` and
 `mpeg`.
 
+`display.icon16x16` is the little 16×16 picture shown next to the track. It
+is a media id in the usual `yoto:#<43 characters>` form, pointing at a
+16×16 PNG with a 24-bit RGBA colour format and alpha transparency. The SDK
+uploads one with `media.upload_display_icon(png)`, and
+`cards.build_track(..., icon_media_id=...)` puts it on a track.
+
 A track can also carry `events` — `onEnd`, `onLhb`, `onRhb`, `onRhbClockwise`
 and `onRhbAntiClockwise` — each with a `cmd` of `repeat`, `stop`, `none`,
 `goto`, `cardEnd` or `chapterEnd`.
@@ -901,6 +1291,9 @@ track overlay labels. The card's **description** lives in
 | `GET` | `/media/upload/{uploadId}/transcoded` | transcode status |
 | `GET` | `/card/{cardId}/media/{mediaId}` | a time-limited signed media URL |
 | `POST` | `/media/coverImage/user/me/upload` | card cover image |
+| `POST` | `/media/displayIcons/user/me/upload` | a 16×16 track icon |
+| `GET` | `/media/displayIcons/user/{yoto\|me}` | Yoto's icon library, or yours |
+| `DELETE` | `/media/displayIcon/{displayIconId}` | remove an uploaded icon |
 
 The pipeline is:
 
@@ -913,6 +1306,13 @@ The pipeline is:
 
 The server transcodes to OGG/Opus, mono or stereo, loudness-normalised to
 -16 LUFS.
+
+A display icon is uploaded as a raw PNG with `Content-Type: image/png` and
+`?autoConvert=false`, and comes back as `{"displayIcon": {"mediaId": ...}}`
+— a 43-character id, the same shape as an audio media id. Note that the
+**delete** endpoint is keyed by the icon's `displayIconId`, not by the
+`mediaId` a track points at; look the `displayIconId` up in
+`/media/displayIcons/user/me` first.
 
 ### Behaviours that will bite you
 
@@ -936,6 +1336,9 @@ The server transcodes to OGG/Opus, mono or stereo, loudness-normalised to
 # offline — models, state, text, tts, generators, books, routes, the HTML desk
 python -m pytest tests/test_unit.py tests/test_generators.py tests/test_acestep.py tests/test_web.py -v
 
+# offline — the theme, the day folders, the library, the numbers, the pixel art
+python -m pytest tests/test_theme.py -v
+
 # live — creates a scratch card, exercises the whole pipeline, deletes it
 python -m pytest tests/test_live.py tests/test_live_tracks.py -v
 
@@ -954,6 +1357,15 @@ against a real account.
   `read-aloud` takes text over the API, but both need the phone to reach this
   machine. The service binds to `127.0.0.1`; `YOTO_ALLOW_REMOTE=true` widens it
   to the LAN, which is enough for a phone on the same wifi and nothing more.
+- **Research for themes other than exoplanets.** `yoto_daily.research` has a
+  source for one topic. A theme with no source behind it falls back to the
+  model and the hand-written bank, and its numbers are only as good as the
+  model's memory.
+- **More themes in the library.** The library holds one: exoplanets. The
+  shape is there — add a `Segment`, and the plan, the pictures and the
+  playlist length follow — but there is only one to prove it.
+- **Scheduled publishing.** The daily job is a command you run, not a timer
+  that runs itself. There is no cron entry, no scheduler and no retry.
 - **Bird calls.** Same shape as music and speech: fetch a recording, upload
   it, publish it. The `file` track type covers it.
 - **A local TTS model.** The `http` speech generator speaks a one-line

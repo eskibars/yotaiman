@@ -4,6 +4,10 @@ Subcommands::
 
     yotaiman serve                       start the service
     yotaiman daily [--topic T]           publish today's story now
+    yotaiman theme <THEME>               build today's themed card
+    yotaiman days                        list the saved days
+    yotaiman restore [--date D]          put a saved day back on the card
+    yotaiman prepare-voice --wav W       cut a usable voice reference clip
     yotaiman token                       print the token the service expects
     yotaiman status                      show the service state
 """
@@ -14,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from .app import create_app
 from .capabilities import base as caps
@@ -149,6 +154,101 @@ def cmd_daily(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_theme(args: argparse.Namespace) -> int:
+    """Build today's themed card."""
+    settings = Settings.load()
+    settings.ensure_dirs()
+
+    caps.set_context(
+        yoto=Yoto(auth=YotoAuth(state_dir=settings.state_dir)),
+        settings=settings,
+        state=StateStore(settings.state_file),
+    )
+
+    params: dict = {"theme": args.theme}
+    for name in ("audience", "voice", "instruction", "date"):
+        value = getattr(args, name, None)
+        if value:
+            params[name] = value
+    if args.no_song:
+        params["song"] = False
+    if args.no_facts:
+        params["facts"] = False
+    if args.plan_only:
+        params["plan_only"] = True
+    if args.dry_run:
+        params["dry_run"] = True
+
+    result = caps.run_safely("daily-theme", **params)
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0 if result.ok else 1
+
+
+def cmd_days(args: argparse.Namespace) -> int:
+    """List the days that were saved."""
+    settings = Settings.load()
+    settings.ensure_dirs()
+
+    result = caps.run_safely("restore-day", list=True)
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0 if result.ok else 1
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    """Put a saved day back on the card."""
+    settings = Settings.load()
+    settings.ensure_dirs()
+
+    caps.set_context(
+        yoto=Yoto(auth=YotoAuth(state_dir=settings.state_dir)),
+        settings=settings,
+        state=StateStore(settings.state_file),
+    )
+
+    params: dict = {}
+    if args.date:
+        params["date"] = args.date
+    if args.slug:
+        params["slug"] = args.slug
+    if args.card_id:
+        params["card_id"] = args.card_id
+
+    result = caps.run_safely("restore-day", **params)
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0 if result.ok else 1
+
+
+def cmd_prepare_voice(args: argparse.Namespace) -> int:
+    """Cut a usable voice reference clip out of a recording."""
+    from .voice import prepare_reference
+
+    settings = Settings.load()
+    settings.ensure_dirs()
+
+    transcript = ""
+    if args.transcript:
+        transcript = Path(args.transcript).read_text(encoding="utf-8")
+    elif args.transcript_text:
+        transcript = args.transcript_text
+
+    try:
+        reference = prepare_reference(
+            args.wav,
+            args.out_wav,
+            args.out_text,
+            transcript=transcript,
+            model_size=args.model,
+            min_seconds=args.min_seconds,
+            max_seconds=args.max_seconds,
+        )
+    except Exception as exc:
+        print(f"could not prepare the voice reference: {exc}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(reference.to_dict(), indent=2))
+    return 0
+
+
 def cmd_token(args: argparse.Namespace) -> int:
     """Print the token the service expects."""
     settings = Settings.load()
@@ -186,6 +286,52 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--voice")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_daily)
+
+    p = sub.add_parser("theme", help="Build today's themed card")
+    p.add_argument("theme", help="The topic, e.g. 'exoplanets'")
+    p.add_argument("--audience", help="Who is listening")
+    p.add_argument("--voice", help="Which voice to narrate in")
+    p.add_argument("--instruction", help="How to read it")
+    p.add_argument("--date", help="Which day's folder to write")
+    p.add_argument("--no-song", dest="no_song", action="store_true")
+    p.add_argument("--no-facts", dest="no_facts", action="store_true")
+    p.add_argument(
+        "--plan-only",
+        dest="plan_only",
+        action="store_true",
+        help="Show what would go on the card, without making any of it",
+    )
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=cmd_theme)
+
+    p = sub.add_parser("days", help="List the saved days")
+    p.set_defaults(func=cmd_days)
+
+    p = sub.add_parser("restore", help="Put a saved day back on the card")
+    p.add_argument("--date", help="The day to restore, e.g. 2026-10-26")
+    p.add_argument("--slug", help="The theme of the day, e.g. exoplanets")
+    p.add_argument("--card-id", dest="card_id", help="Which card to restore onto")
+    p.set_defaults(func=cmd_restore)
+
+    p = sub.add_parser(
+        "prepare-voice", help="Cut a usable voice reference clip out of a recording"
+    )
+    p.add_argument("--wav", required=True, help="The recording to cut from")
+    p.add_argument("--out-wav", dest="out_wav", required=True)
+    p.add_argument("--out-text", dest="out_text", required=True)
+    p.add_argument(
+        "--transcript",
+        help="A file holding the full transcript of the recording",
+    )
+    p.add_argument(
+        "--transcript-text",
+        dest="transcript_text",
+        help="The full transcript of the recording, given directly",
+    )
+    p.add_argument("--model", default="small.en", help="The speech recognition model")
+    p.add_argument("--min-seconds", dest="min_seconds", type=float, default=3.0)
+    p.add_argument("--max-seconds", dest="max_seconds", type=float, default=8.0)
+    p.set_defaults(func=cmd_prepare_voice)
 
     p = sub.add_parser("token", help="Print the API token")
     p.set_defaults(func=cmd_token)

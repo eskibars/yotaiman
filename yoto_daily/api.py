@@ -544,3 +544,40 @@ def publish_daily():
         return _error("too many requests; slow down", 429)
     result = caps.run_safely("daily-story", **_body())
     return jsonify(_capability_payload(result)), (200 if result.ok else 400)
+
+
+@api.get("/days")
+@_guard
+def list_days():
+    """The days that were written out, newest first."""
+    from .days import list_days as _list_days
+
+    records = [_day_payload(r) for r in _list_days(_settings().work_dir)]
+    return jsonify({"ok": True, "days": records, "count": len(records)})
+
+
+@api.post("/days/<day>/restore")
+@_guard
+def restore_day(day: str):
+    """Put a saved day back on the card."""
+    if rate_limited():
+        return _error("too many requests; slow down", 429)
+    body = _body()
+    body["date"] = day
+    result = caps.run_safely("restore-day", **body)
+    return jsonify(_capability_payload(result)), (200 if result.ok else 400)
+
+
+@api.post("/themes")
+@_guard
+def publish_theme():
+    """Build today's themed card."""
+    if rate_limited():
+        return _error("too many requests; slow down", 429)
+    result = caps.run_safely("daily-theme", **_body())
+    return jsonify(_capability_payload(result)), (200 if result.ok else 400)
+
+
+def _day_payload(record: Any) -> dict[str, Any]:
+    """One saved day, for the API listing."""
+    return record.to_dict() if hasattr(record, "to_dict") else dict(record)

@@ -175,6 +175,52 @@ class Settings:
         default_factory=lambda: _env_int("YOTO_RATE_LIMIT", 30)
     )
 
+    #: Who the daily card is written for.  The theme writer uses this to
+    #: pitch the words at the right age.
+    theme_audience: str = field(
+        default_factory=lambda: os.environ.get(
+            "YOTO_THEME_AUDIENCE", "two children, one about five years old and one about ten"
+        )
+    )
+
+    #: The named voice the daily capabilities narrate in.  Empty means the
+    #: speech generator's own default.
+    theme_voice: str = field(
+        default_factory=lambda: os.environ.get("YOTO_THEME_VOICE", "")
+    )
+
+    #: How long the theme song should be, in seconds.
+    theme_song_seconds: int = field(
+        default_factory=lambda: _env_int("YOTO_THEME_SONG_SECONDS", 60)
+    )
+
+    #: Which theme writer to use: ``auto``, ``ollama`` or ``template``.
+    theme_backend: str = field(
+        default_factory=lambda: os.environ.get("YOTO_THEME_BACKEND", "auto")
+    )
+
+    #: The local Ollama server.
+    ollama_endpoint: str = field(
+        default_factory=lambda: os.environ.get("YOTO_OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
+    )
+    ollama_model: str = field(
+        default_factory=lambda: os.environ.get("YOTO_OLLAMA_MODEL", "qwen3:1.7b")
+    )
+    ollama_timeout: float = field(
+        default_factory=lambda: float(os.environ.get("YOTO_OLLAMA_TIMEOUT", "600"))
+    )
+
+    #: How many times to ask the model for a story before falling back to
+    #: the hand-written themes.
+    theme_attempts: int = field(
+        default_factory=lambda: _env_int("YOTO_THEME_ATTEMPTS", 3)
+    )
+
+    #: How many planets to pull facts about for a themed card.
+    research_fact_count: int = field(
+        default_factory=lambda: _env_int("YOTO_RESEARCH_FACTS", 8)
+    )
+
     @classmethod
     def load(cls, path: Path | str | None = None) -> "Settings":
         """Build settings from a config file plus the environment."""
@@ -217,6 +263,28 @@ class Settings:
             settings.daily_mode = str(daily["mode"])
         if daily.get("history_days") and not os.environ.get("YOTO_HISTORY_DAYS"):
             settings.history_days = int(daily["history_days"])
+        if daily.get("voice") and not os.environ.get("YOTO_THEME_VOICE"):
+            settings.theme_voice = str(daily["voice"])
+
+        theme = raw.get("theme") or {}
+        if theme.get("audience") and not os.environ.get("YOTO_THEME_AUDIENCE"):
+            settings.theme_audience = str(theme["audience"])
+        if theme.get("voice") and not os.environ.get("YOTO_THEME_VOICE"):
+            settings.theme_voice = str(theme["voice"])
+        if theme.get("song_seconds") and not os.environ.get("YOTO_THEME_SONG_SECONDS"):
+            settings.theme_song_seconds = int(theme["song_seconds"])
+        if theme.get("backend") and not os.environ.get("YOTO_THEME_BACKEND"):
+            settings.theme_backend = str(theme["backend"])
+        if theme.get("ollama_endpoint") and not os.environ.get("YOTO_OLLAMA_ENDPOINT"):
+            settings.ollama_endpoint = str(theme["ollama_endpoint"])
+        if theme.get("ollama_model") and not os.environ.get("YOTO_OLLAMA_MODEL"):
+            settings.ollama_model = str(theme["ollama_model"])
+        if theme.get("ollama_timeout") and not os.environ.get("YOTO_OLLAMA_TIMEOUT"):
+            settings.ollama_timeout = float(theme["ollama_timeout"])
+        if theme.get("attempts") and not os.environ.get("YOTO_THEME_ATTEMPTS"):
+            settings.theme_attempts = int(theme["attempts"])
+        if theme.get("research_facts") and not os.environ.get("YOTO_RESEARCH_FACTS"):
+            settings.research_fact_count = int(theme["research_facts"])
 
         speech = ((raw.get("generators") or {}).get("speech") or {})
         say_options = ((speech.get("options") or {}).get("say") or {})

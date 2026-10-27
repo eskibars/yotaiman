@@ -162,6 +162,7 @@ def index():
         daily_card=daily_card,
         daily_id=daily_id,
         last_story=state.get("last_story", {}),
+        last_theme=state.get("last_theme", {}),
         last_run=state.get("last_run", ""),
         session_ok=session_ok,
         refresh=refresh,
@@ -342,6 +343,28 @@ def publish_daily():
         flash("Too many stories in a row. Give it a minute.", "error")
         return redirect(url_for("web.index"))
     result = caps.run_safely("daily-story", **request.form.to_dict())
+    flash(scrub_paths(result.message), "success" if result.ok else "error")
+    return redirect(url_for("web.index"))
+
+
+@web.post("/theme")
+def publish_theme():
+    """Build today's themed card: a story, a song and the facts."""
+    if rate_limited():
+        flash("Too many cards in a row. Give it a minute.", "error")
+        return redirect(url_for("web.index"))
+    result = caps.run_safely("daily-theme", **request.form.to_dict())
+    flash(scrub_paths(result.message), "success" if result.ok else "error")
+    return redirect(url_for("web.index"))
+
+
+@web.post("/restore")
+def restore_day():
+    """Put a saved day back on the card."""
+    if rate_limited():
+        flash("Too many requests in a row. Give it a minute.", "error")
+        return redirect(url_for("web.index"))
+    result = caps.run_safely("restore-day", **request.form.to_dict())
     flash(scrub_paths(result.message), "success" if result.ok else "error")
     return redirect(url_for("web.index"))
 

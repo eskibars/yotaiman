@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from yoto import Yoto  # noqa: E402
+from yoto_daily.config import Settings  # noqa: E402
 
 RUN_LIVE = os.environ.get("YOTO_LIVE_TESTS", "1") not in ("0", "false", "no")
 
@@ -242,8 +243,16 @@ def test_generators_endpoints(client):
 
     speech = client.get("/api/generators/speech").get_json()
     assert speech["kind"] == "speech"
-    assert any(g["name"] == "say" for g in speech["generators"])
-    assert speech["default"] == "say"
+    assert speech["generators"]
+    # The default is whatever config.yaml says, which is not necessarily
+    # the same on every machine.
+    configured = (
+        Settings.load().raw_config.get("generators", {})
+        .get("speech", {})
+        .get("default", "")
+    )
+    assert speech["default"] == configured
+    assert any(g["name"] == speech["default"] for g in speech["generators"])
 
 
 # ----------------------------------------------------------------------

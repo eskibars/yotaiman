@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -330,7 +331,11 @@ def test_a_request_can_override_the_configured_instruction(tmp_path, monkeypatch
     monkeypatch.setattr(generator, "_prompt", lambda model, config: (None, None))
     monkeypatch.setattr(generator, "_fragment_budget", lambda *a, **k: 20)
     monkeypatch.setattr(generator, "_split_text", lambda text, max_length: [text])
-    monkeypatch.setattr(generator, "_write_wav", lambda *a, **k: None)
+
+    # The audio is written for real, because the generator hands it to
+    # ffmpeg afterwards, and ffmpeg needs a file it can open.
+    if shutil.which(generator.ffmpeg_command) is None:
+        pytest.skip("ffmpeg is not installed")
 
     out = tmp_path / "speech.wav"
     generator.synthesize("hello", out)

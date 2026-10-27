@@ -218,6 +218,62 @@ class MediaService:
         return cover
 
     # ------------------------------------------------------------------
+    def upload_display_icon(
+        self,
+        png: bytes,
+        *,
+        user_scope: str = "me",
+        auto_convert: bool = False,
+    ) -> dict[str, Any]:
+        """Upload a 16x16 pixel-art icon and return its descriptor.
+
+        The icon is the little picture the Yoto app and the player show
+        next to a track.  It is a 16x16 PNG with a 24-bit RGBA colour
+        format and alpha transparency, and the id it comes back with is
+        what goes into a track's ``display.icon16x16``.
+
+        The same endpoint serves the built-in Yoto icon library, so a
+        card can also use one of those instead.
+        """
+        if not png.startswith(b"\x89PNG"):
+            raise TranscodeError("a display icon has to be a PNG")
+        data = self.client.post_bytes(
+            f"/media/displayIcons/user/{user_scope}/upload",
+            png,
+            content_type="image/png",
+            params={"autoConvert": str(auto_convert).lower()},
+        )
+        icon = data.get("displayIcon")
+        if not icon:
+            raise TranscodeError(f"no display icon returned: {data}")
+        return icon
+
+    def list_display_icons(self, *, user_scope: str = "me") -> list[dict[str, Any]]:
+        """The icons this account can use.
+
+        The ``yoto`` scope is Yoto's own library; the ``me`` scope is
+        whatever has been uploaded to this account.
+        """
+        data = self.client.get(f"/media/displayIcons/user/{user_scope}")
+        return list(data.get("displayIcons") or [])
+
+    def delete_display_icon(self, media_id: str) -> None:
+        """Remove an uploaded icon.
+
+        The delete endpoint is keyed by the icon's ``displayIconId``, not
+        by the media id that a track points at, so the media id is looked
+        up first.
+        """
+        display_icon_id = ""
+        for icon in self.list_display_icons(user_scope="me"):
+            if str(icon.get("mediaId") or "") == str(media_id):
+                display_icon_id = str(icon.get("displayIconId") or "")
+                break
+        if not display_icon_id:
+            raise TranscodeError(f"no display icon with the media id {media_id}")
+        self.client.delete(f"/media/displayIcon/{display_icon_id}")
+
+    # ------------------------------------------------------------------
     def upload_audio(
         self,
         path: Path | str,
